@@ -17,75 +17,22 @@
 #include <xcb/xfixes.h>
 #include <xcb/xinerama.h>
 
-#define MAX(x, y) x >= y ? x : y
 #define SWAP(x, y, type)                                                      \
 	x = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
 	y = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
 	x = (type)((uintmax_t)x ^ (uintmax_t)y)
 
-xcb_connection_t *dpy;
+xcb_connection_t *d;
 xcb_screen_t *scr;
 FILE *file = NULL; bool ispipe;
 
+static void blend(uint32_t *dest, uint32_t source);
+static void cursor(uint32_t *img, short x, short y, short w, short h);
 static void die(const char *fmt, ...);
 static void error(png_structp png, png_const_charp msg);
-static void cursor(uint8_t *img, short x, short y, short w, short h);
-static void blend(uint32_t *dest, uint32_t source);
-
 static void monitor(short *x, short *y, short *w, short *h);
-static void window(short *x, short *y, short *w, short *h);
 static void sel(short *x, short *y, short *w, short *h);
-
-static void
-die(const char *fmt, ...)
-{
-	va_list list;
-	va_start(list, fmt);
-	vfprintf(stderr, fmt, list);
-	va_end(list);
-
-	if (fmt[strlen(fmt) - 1] != '\n')
-		perror(NULL);
-	if (file != NULL)
-		!ispipe ? fclose(file) : pclose(file);
-	if (dpy != NULL)
-		xcb_disconnect(dpy);
-	exit(1);
-}
-
-static void
-error(png_structp png, png_const_charp msg)
-{
-	die("lynx: unable to write png data: %s\n", msg);
-}
-
-static void
-cursor(uint8_t *img, short x, short y, short w, short h)
-{
-	xcb_xfixes_query_version_reply_t *qver;
-	if ((qver = xcb_xfixes_query_version_reply(dpy,
-			xcb_xfixes_query_version(dpy, ~0, ~0), NULL)) == NULL)
-		die("lynx: unable to use xfixes\n");
-	free(qver);
-
-	xcb_xfixes_get_cursor_image_reply_t *res =
-			xcb_xfixes_get_cursor_image_reply(dpy,
-			xcb_xfixes_get_cursor_image(dpy), NULL);
-	uint32_t *cur = xcb_xfixes_get_cursor_image_cursor_image(res);
-
-	for (int i = 0; i < res->height; ++i) {
-		for (int j = 0; j < res->width; ++j) {
-			if (res->x + j >= x && res->y + i >= y && 
-					res->x - res->xhot - x + j < w &&
-					res->y - res->yhot - y + i < h)
-				blend(&((uint32_t *)img)[
-					(res->y - res->yhot + i - y) * w +
-					(res->x - res->xhot + j - x)
-				], cur[i * res->width + j]);
-		}
-	}
-	free(res);
-}
+static void window(short *x, short *y, short *w, short *h);
 
 static void
 blend(uint32_t *dest, uint32_t source)
@@ -101,25 +48,73 @@ blend(uint32_t *dest, uint32_t source)
 }
 
 static void
+cursor(uint32_t *img, short x, short y, short w, short h)
+{
+	xcb_xfixes_query_version_reply_t *qver;
+	if ((qver = xcb_xfixes_query_version_reply(d,
+			xcb_xfixes_query_version(d, ~0, ~0), NULL)) == NULL)
+		die("lynx: unable to use xfixes\n");
+	free(qver);
+
+	xcb_xfixes_get_cursor_image_reply_t *res =
+			xcb_xfixes_get_cursor_image_reply(d,
+			xcb_xfixes_get_cursor_image(d), NULL);
+	uint32_t *cur = xcb_xfixes_get_cursor_image_cursor_image(res);
+	for (int i = 0; i < res->height; ++i) {
+		for (int j = 0; j < res->width; ++j) {
+			if (res->x + j >= x && res->y + i >= y && 
+					res->x - res->xhot - x + j < w &&
+					res->y - res->yhot - y + i < h)
+				blend(&img[
+					(res->y - res->yhot + i - y) * w +
+					(res->x - res->xhot + j - x)
+				], cur[i * res->width + j]);
+		}
+	}
+	free(res);
+}
+
+static void
+die(const char *fmt, ...)
+{
+	va_list list;
+	va_start(list, fmt);
+	vfprintf(stderr, fmt, list);
+	va_end(list);
+
+	if (fmt[strlen(fmt) - 1] != '\n')
+		perror(NULL);
+	if (file != NULL)
+		!ispipe ? fclose(file) : pclose(file);
+	if (d != NULL)
+		xcb_disconnect(d);
+	exit(1);
+}
+
+static void
+error(png_structp png, png_const_charp msg)
+{
+	die("lynx: unable to write png data: %s\n", msg);
+}
+
+static void
 monitor(short *x, short *y, short *w, short *h)
 {
 	xcb_xinerama_query_version_reply_t *qver;
-	if ((qver = xcb_xinerama_query_version_reply(dpy,
-			xcb_xinerama_query_version(dpy, ~0, ~0),
-			NULL)) == NULL)
+	if ((qver = xcb_xinerama_query_version_reply(d,
+			xcb_xinerama_query_version(d, ~0, ~0), NULL)) == NULL)
 		die("lynx: unable to use xinerama\n");
 	free(qver);
 
 	xcb_xinerama_query_screens_reply_t *info;
-	if ((info = xcb_xinerama_query_screens_reply(dpy,
-			xcb_xinerama_query_screens(dpy), NULL)) == NULL) {
-		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
+	if ((info = xcb_xinerama_query_screens_reply(d,
+			xcb_xinerama_query_screens(d), NULL)) == NULL) {
 		free(info);
 		return;
 	}
 
-	xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(dpy,
-			xcb_query_pointer(dpy, scr->root), NULL);
+	xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(d,
+			xcb_query_pointer(d, scr->root), NULL);
 	xcb_xinerama_screen_info_iterator_t iter =
 			xcb_xinerama_query_screens_screen_info_iterator(info);
 	while (iter.rem > 0) {
@@ -128,24 +123,24 @@ monitor(short *x, short *y, short *w, short *h)
 		if (ptr->root_x >= data->x_org && ptr->root_y >= data->y_org &&
 				ptr->root_x <= data->x_org + data->width &&
 				ptr->root_y <= data->y_org + data->height) {
-			*x = data->x_org; *y = data->y_org;
-			*w = data->width; *h = data->height;
+			*x = data->x_org;
+			*y = data->y_org;
+			*w = data->width;
+			*h = data->height;
 			break;
 		}
 	}
-	if (iter.rem == 0)
-		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
 	free(info); free(ptr);
 }
 
 static void
-window(short *x, short *y, short *w, short *h)
+sel(short *x, short *y, short *w, short *h)
 {
 
 }
 
 static void
-sel(short *x, short *y, short *w, short *h)
+window(short *x, short *y, short *w, short *h)
 {
 
 }
@@ -156,62 +151,78 @@ main(int argc, char **argv)
 	char opt = 's', *coords = NULL;
 	bool showcur = false, freeze = false;
 	if (*(argv = &argv[1]) != NULL && (*argv)[0] == '-') {
-		bool end = false;
+		bool end = false; /* ensure defined behaviour NULL bound */
 		char *optstr = *argv;
 		for (int i = 1; optstr[i] != '\0'; ++i)
-				switch (optstr[i]) {
-		case 'c': showcur = !showcur; break;
-		case 'f': freeze  = !freeze;  break;
-
-		case 'i':
-			if (!end && (coords = *(argv = &argv[1])) == NULL)
-				end = true;
-			/* FALLTHROUGH */
-		case 'a':
-		case 's':
-		case 'm':
-		case 'w':
-			opt = optstr[i];
-			break;
-
-		default:
-			die("lynx: invalid option: -%c\n", optstr[i]);
-		}
+			switch (optstr[i]) {
+			case 'i':
+				if (!end && (coords =
+						*(argv = &argv[1])) == NULL)
+					  end = true;
+				/* FALLTHROUGH */
+			case 'a':
+			case 'm':
+			case 's':
+			case 'w':
+				opt = optstr[i];
+				break;
+			case 'c':
+				showcur = !showcur;
+				break;
+			case 'f':
+				freeze = !freeze;
+				break;
+			default:
+				die("lynx: invalid option: -%c\n", optstr[i]);
+			}
 	}
 
-	int scrnum;
-	dpy = xcb_connect(NULL, &scrnum);
-	const xcb_setup_t *setup = xcb_get_setup(dpy);
+	int screen;
+	d = xcb_connect(NULL, &screen);
+	const xcb_setup_t *setup = xcb_get_setup(d);
 	xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
-	for (int i = 0; i < scrnum; ++i) xcb_screen_next(&iter);
+	for (int i = 0; i < screen; ++i)
+		xcb_screen_next(&iter);
 	scr = iter.data;
 
+	int16_t x = 0, y = 0,
+			w = scr->width_in_pixels, h = scr->height_in_pixels;
 	if (freeze)
-		xcb_grab_server(dpy);
-	short x = 0, y = 0, w = 0, h = 0;
+		xcb_grab_server(d);
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("lynx: must supply option with -i argument\n");
-		short array[3];
+
+		int16_t arr[3];
 		char *start = coords, *end;
 		for (int i = 0; i < 3; ++i, start = ++end) {
-			array[i] = strtoul(start, &end, 10);
+			arr[i] = strtoul(start, &end, 10);
 			if (*end != ',' || !isdigit(*start))
 				die("lynx: invalid option: %s\n", coords);
 		}
 		h = strtoul(start, &end, 10);
 		if (*end != '\0' || !isdigit(*start))
 			die("lynx: invalid option: %s\n", coords);
-		x = array[0], y = array[1], w = array[2];
-	} else if (opt == 's') {
-		sel(&x, &y, &w, &h);
+		x = arr[0], y = arr[1], w = arr[2];
 	} else if (opt == 'm') {
 		monitor(&x, &y, &w, &h);
+	} else if (opt == 's') {
+		sel(&x, &y, &w, &h);
 	} else if (opt == 'w') {
 		window(&x, &y, &w, &h);
-	} else {
-		w = scr->width_in_pixels; h = scr->height_in_pixels;
 	}
+
+	xcb_get_image_reply_t *res;
+	if ((res = xcb_get_image_reply(d, xcb_get_image(d,
+			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root,
+			x, y, w, h, ~0), NULL)) == NULL)
+		die("lynx: unable to get image\n");
+	uint32_t *img = (uint32_t *)xcb_get_image_data(res);
+
+	if (showcur)
+		cursor(img, x, y, w, h);
+	if (freeze)
+		xcb_ungrab_server(d);
 
 	char *buf1, *buf2;
 	ssize_t size1 = 256, size2 = 256;
@@ -223,35 +234,24 @@ main(int argc, char **argv)
 		ssize_t len;
 		if ((len = readlink(buf1, buf2, size1 - 1)) == -1) {
 			if (errno == EINVAL)
-				break;
+				break; /* EINVAL for non-links, finish */
 			die("lynx: unable to read symlink: %s: ", buf1);
 		}
 		if (len == size2 - 1) {
 			if ((buf2 = realloc(buf2, size2 * 2)) == NULL)
 				die("lynx: unable to allocate memory: ");
-			continue;
+			continue; /* not enough room, try again */
 		}
-		SWAP(buf1, buf2, char *); SWAP(size1, size2, ssize_t);
+		SWAP(buf1, buf2, char *);
+		SWAP(size1, size2, ssize_t);
 		buf1[len] = '\0';
 	}
 
 	struct stat statbuf;
 	if (stat(buf1, &statbuf) == -1)
 		die("lynx: unable to stat file: %s: ", buf1);
-	ispipe = S_ISCHR(statbuf.st_mode);
+	ispipe = S_ISCHR(statbuf.st_mode); /* no output to stdout */
 	free(buf1); free(buf2);
-
-	xcb_get_image_reply_t *res;
-	if ((res = xcb_get_image_reply(dpy, xcb_get_image(dpy,
-			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root,
-			x, y, w, h, ~0), NULL)) == NULL)
-		die("lynx: unable to get image\n");
-	uint8_t *img = xcb_get_image_data(res);
-
-	if (showcur)
-		cursor(img, x, y, w, h);
-	if (freeze)
-		xcb_ungrab_server(dpy);
 
 	if (!ispipe) {
 		if ((file = fopen("/dev/stdout", "wb")) == NULL)
@@ -260,6 +260,7 @@ main(int argc, char **argv)
 			"w")) == NULL) {
 		die("lynx: unable to open pipe: ");
 	}
+
 	png_structp png;
 	if ((png = png_create_write_struct(PNG_LIBPNG_VER_STRING,
 			NULL, NULL, NULL)) == NULL)
@@ -276,11 +277,11 @@ main(int argc, char **argv)
 
 	png_write_info(png, info);
 	for (int i = 0; i < h; ++i)
-		png_write_rows(png, &(png_bytep){ &img[i * w * 4] }, 1);
+		png_write_rows(png, &(png_bytep){ (png_bytep)&img[i * w] }, 1);
 	png_write_end(png, NULL);
 
 	free(res);
 	png_destroy_write_struct(&png, &info);
 	!ispipe ? fclose(file) : pclose(file);
-	xcb_disconnect(dpy);
+	xcb_disconnect(d);
 }
