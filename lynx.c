@@ -123,10 +123,8 @@ monitor(short *x, short *y, short *w, short *h)
 		if (ptr->root_x >= data->x_org && ptr->root_y >= data->y_org &&
 				ptr->root_x <= data->x_org + data->width &&
 				ptr->root_y <= data->y_org + data->height) {
-			*x = data->x_org;
-			*y = data->y_org;
-			*w = data->width;
-			*h = data->height;
+			*x = data->x_org; *y = data->y_org;
+			*w = data->width; *h = data->height;
 			break;
 		}
 	}
@@ -136,7 +134,47 @@ monitor(short *x, short *y, short *w, short *h)
 static void
 sel(short *x, short *y, short *w, short *h)
 {
+	xcb_window_t win = xcb_generate_id(d);
+	xcb_create_window(d, XCB_COPY_FROM_PARENT, win, scr->root, 0, 0,
+			*w, *h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+			scr->root_visual, 0, NULL);
 
+#define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
+	XCB_EVENT_MASK_BUTTON_MOTION
+	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(d, false, scr->root,
+			MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			XCB_NONE, XCB_NONE, XCB_CURRENT_TIME);
+	xcb_grab_keyboard_cookie_t ckey = xcb_grab_keyboard(d,
+			false, scr->root, XCB_CURRENT_TIME,
+			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_pointer_reply_t *ptr;
+	if ((ptr = xcb_grab_pointer_reply(d, cptr, NULL)) == NULL)
+		die("lynx: unable to grab pointer\n");
+	xcb_grab_keyboard_reply_t *key;
+	if ((key = xcb_grab_keyboard_reply(d, ckey, NULL)) == NULL)
+		die("lynx: unable to grab keyboard\n");
+	free(ptr); free(key);
+
+	xcb_generic_event_t *evt;
+	while ((evt = xcb_wait_for_event(d)) != NULL &&
+			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
+		switch (evt->response_type & ~0x80) {
+		case XCB_BUTTON_PRESS: {
+			xcb_button_press_event_t *ev =
+					(xcb_button_press_event_t *)evt;
+			*x = ev->root_x, *y = ev->root_y;
+			break;
+		}
+		case XCB_MOTION_NOTIFY: {
+			xcb_motion_notify_event_t *ev =
+					(xcb_motion_notify_event_t *)evt;
+			*w = ev->root_x - *x, *h = ev->root_y - *y;
+			break;
+		}
+		}
+		free(evt);
+	}
+	free(evt);
 }
 
 static void
@@ -221,6 +259,8 @@ main(int argc, char **argv)
 	} else if (opt == 'w') {
 		window(&x, &y, &w, &h);
 	}
+
+	fprintf(stderr, "%hd %hd %hd %hd\n", x, y, w, h);
 
 	xcb_get_image_reply_t *res;
 	if ((res = xcb_get_image_reply(d, xcb_get_image(d,
