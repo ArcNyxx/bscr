@@ -14,8 +14,10 @@
 
 #include <png.h>
 #include <xcb/xcb.h>
+#include <xcb/xfixes.h>
 #include <xcb/xinerama.h>
 
+#define MAX(x, y) x >= y ? x : y
 #define SWAP(x, y, type)                                                      \
 	x = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
 	y = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
@@ -27,6 +29,8 @@ FILE *file = NULL; bool ispipe;
 
 static void die(const char *fmt, ...);
 static void error(png_structp png, png_const_charp msg);
+static void cursor(uint8_t *img, short x, short y, short w, short h);
+static void blend(uint32_t *dest, uint32_t source);
 
 static void monitor(short *x, short *y, short *w, short *h);
 static void window(short *x, short *y, short *w, short *h);
@@ -56,8 +60,55 @@ error(png_structp png, png_const_charp msg)
 }
 
 static void
+cursor(uint8_t *img, short x, short y, short w, short h)
+{
+	xcb_xfixes_query_version_reply_t *qver;
+	if ((qver = xcb_xfixes_query_version_reply(dpy,
+			xcb_xfixes_query_version(dpy, ~0, ~0), NULL)) == NULL)
+		die("lynx: unable to use xfixes\n");
+	free(qver);
+
+	xcb_xfixes_get_cursor_image_reply_t *res =
+			xcb_xfixes_get_cursor_image_reply(dpy,
+			xcb_xfixes_get_cursor_image(dpy), NULL);
+	uint32_t *cur = xcb_xfixes_get_cursor_image_cursor_image(res);
+
+	for (int i = 0; i < res->height; ++i) {
+		for (int j = 0; j < res->width; ++j) {
+			if (res->x + j >= x && res->y + i >= y && 
+					res->x - res->xhot - x + j < w &&
+					res->y - res->yhot - y + i < h)
+				blend(&((uint32_t *)img)[
+					(res->y - res->yhot + i - y) * w +
+					(res->x - res->xhot + j - x)
+				], cur[i * res->width + j]);
+		}
+	}
+}
+
+static void
+blend(uint32_t *dest, uint32_t source)
+{
+	float alpha = (float)(source >> 24 & 255) / 255.0;
+	uint32_t diff1 = (*dest >>  0 & 255) * (1.0 - alpha) +
+		(source >>  0 & 255) * alpha;
+	uint32_t diff2 = (*dest >>  8 & 255) * (1.0 - alpha) +
+		(source >>  8 & 255) * alpha;
+	uint32_t diff3 = (*dest >> 16 & 255) * (1.0 - alpha) +
+		(source >> 16 & 255) * alpha;
+	*dest = 255 << 24 | diff3 << 16 | diff2 << 8 | diff1;
+}
+
+static void
 monitor(short *x, short *y, short *w, short *h)
 {
+	xcb_xinerama_query_version_reply_t *qver;
+	if ((qver = xcb_xinerama_query_version_reply(dpy,
+			xcb_xinerama_query_version(dpy, ~0, ~0),
+			NULL)) == NULL)
+		die("lynx: unable to use xinerama\n");
+	free(qver);
+
 	xcb_xinerama_query_screens_reply_t *info;
 	if ((info = xcb_xinerama_query_screens_reply(dpy,
 			xcb_xinerama_query_screens(dpy), NULL)) == NULL) {
@@ -138,15 +189,17 @@ main(int argc, char **argv)
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("lynx: must supply option with -i argument\n");
+		short array[3];
 		char *start = coords, *end;
 		for (int i = 0; i < 3; ++i, start = ++end) {
-			((short *)&x)[i] = strtoul(start, &end, 10);
+			array[i] = strtoul(start, &end, 10);
 			if (*end != ',' || !isdigit(*start))
 				die("lynx: invalid option: %s\n", coords);
 		}
 		h = strtoul(start, &end, 10);
 		if (*end != '\0' || !isdigit(*start))
 			die("lynx: invalid option: %s\n", coords);
+		x = array[0], y = array[1], w = array[2];
 	} else if (opt == 's') {
 		sel(&x, &y, &w, &h);
 	} else if (opt == 'm') {
@@ -185,10 +238,15 @@ main(int argc, char **argv)
 	ispipe = S_ISCHR(statbuf.st_mode);
 	free(buf1); free(buf2);
 
-	xcb_get_image_cookie_t cimg = xcb_get_image(dpy,
-			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root, x, y, w, h, ~0);
-	xcb_get_image_reply_t *rimg = xcb_get_image_reply(dpy, cimg, NULL);
-	uint8_t *img = xcb_get_image_data(rimg);
+	xcb_get_image_reply_t *res;
+	if ((res = xcb_get_image_reply(dpy, xcb_get_image(dpy,
+			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root,
+			x, y, w, h, ~0), NULL)) == NULL)
+		die("lynx: unable to get image\n");
+	uint8_t *img = xcb_get_image_data(res);
+
+	if (showcur)
+		cursor(img, x, y, w, h);
 
 	if (!ispipe) {
 		if ((file = fopen("/dev/stdout", "wb")) == NULL)
@@ -216,7 +274,7 @@ main(int argc, char **argv)
 		png_write_rows(png, &(png_bytep){ &img[i * w * 4] }, 1);
 	png_write_end(png, NULL);
 
-	free(rimg);
+	free(res);
 	png_destroy_write_struct(&png, &info);
 	!ispipe ? fclose(file) : pclose(file);
 	xcb_disconnect(dpy);
