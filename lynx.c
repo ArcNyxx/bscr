@@ -14,17 +14,23 @@
 
 #include <png.h>
 #include <xcb/xcb.h>
+#include <xcb/xinerama.h>
 
 #define SWAP(x, y, type)                                                      \
 	x = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
 	y = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
 	x = (type)((uintmax_t)x ^ (uintmax_t)y)
 
-xcb_connection_t *conn;
-FILE *file; bool ispipe;
+xcb_connection_t *dpy;
+xcb_screen_t *scr;
+FILE *file = NULL; bool ispipe;
 
 static void die(const char *fmt, ...);
 static void error(png_structp png, png_const_charp msg);
+
+static void monitor(short *x, short *y, short *w, short *h);
+static void window(short *x, short *y, short *w, short *h);
+static void sel(short *x, short *y, short *w, short *h);
 
 static void
 die(const char *fmt, ...)
@@ -36,25 +42,67 @@ die(const char *fmt, ...)
 
 	if (fmt[strlen(fmt) - 1] != '\n')
 		perror(NULL);
-	if (conn != NULL)
-		xcb_disconnect(conn);
+	if (file != NULL)
+		!ispipe ? fclose(file) : pclose(file);
+	if (dpy != NULL)
+		xcb_disconnect(dpy);
 	exit(1);
 }
 
 static void
 error(png_structp png, png_const_charp msg)
 {
-	!ispipe ? fclose(file) : pclose(file);
-	die("lynx: png error: %s\n", msg);
+	die("lynx: unable to write png data: %s\n", msg);
+}
+
+static void
+monitor(short *x, short *y, short *w, short *h)
+{
+	xcb_xinerama_query_screens_reply_t *info;
+	if ((info = xcb_xinerama_query_screens_reply(dpy,
+			xcb_xinerama_query_screens(dpy), NULL)) == NULL) {
+		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
+		free(info);
+		return;
+	}
+
+	xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(dpy,
+			xcb_query_pointer(dpy, scr->root), NULL);
+	xcb_xinerama_screen_info_iterator_t iter =
+			xcb_xinerama_query_screens_screen_info_iterator(info);
+	while (iter.rem > 0) {
+		xcb_xinerama_screen_info_next(&iter);
+		const xcb_xinerama_screen_info_t *data = iter.data;
+		if (ptr->root_x >= data->x_org && ptr->root_y >= data->y_org &&
+				ptr->root_x <= data->x_org + data->width &&
+				ptr->root_y <= data->y_org + data->height) {
+			*x = data->x_org; *y = data->y_org;
+			*w = data->width; *h = data->height;
+			break;
+		}
+	}
+	if (iter.rem == 0)
+		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
+	free(info); free(ptr);
+}
+
+static void
+window(short *x, short *y, short *w, short *h)
+{
+
+}
+
+static void
+sel(short *x, short *y, short *w, short *h)
+{
+
 }
 
 int
 main(int argc, char **argv)
 {
-	short x = 0, y = 0, w = 0, h = 0, opt = 2;
-	char *coords = NULL;
+	char opt = 's', *coords = NULL;
 	bool showcur = false, freeze = false;
-
 	if (*(argv = &argv[1]) != NULL && (*argv)[0] == '-') {
 		bool end = false;
 		char *optstr = *argv;
@@ -63,29 +111,33 @@ main(int argc, char **argv)
 		case 'c': showcur = !showcur; break;
 		case 'f': freeze  = !freeze;  break;
 
-		case 'a': opt = 0; break;
-		case 'i': opt = 1;
+		case 'i':
 			if (!end && (coords = *(argv = &argv[1])) == NULL)
 				end = true;
+			/* FALLTHROUGH */
+		case 'a':
+		case 's':
+		case 'm':
+		case 'w':
+			opt = optstr[i];
 			break;
-		case 's': opt = 2; break;
-		case 'm': opt = 3; break;
-		case 'w': opt = 4; break;
 
 		default:
 			die("lynx: invalid option: -%c\n", optstr[i]);
 		}
 	}
 
-	int n;
-	conn = xcb_connect(NULL, &n);
-	const xcb_setup_t *setup = xcb_get_setup(conn);
+	int scrnum;
+	dpy = xcb_connect(NULL, &scrnum);
+	const xcb_setup_t *setup = xcb_get_setup(dpy);
 	xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
-	for (int i = 0; i < n; ++i)
-		xcb_screen_next(&iter);
-	xcb_screen_t *scr = iter.data;
+	for (int i = 0; i < scrnum; ++i) xcb_screen_next(&iter);
+	scr = iter.data;
 
-	if (opt == 1) {
+	short x = 0, y = 0, w = 0, h = 0;
+	if (opt == 'i') {
+		if (coords == NULL)
+			die("lynx: must supply option with -i argument\n");
 		char *start = coords, *end;
 		for (int i = 0; i < 3; ++i, start = ++end) {
 			((short *)&x)[i] = strtoul(start, &end, 10);
@@ -95,6 +147,12 @@ main(int argc, char **argv)
 		h = strtoul(start, &end, 10);
 		if (*end != '\0' || !isdigit(*start))
 			die("lynx: invalid option: %s\n", coords);
+	} else if (opt == 's') {
+		sel(&x, &y, &w, &h);
+	} else if (opt == 'm') {
+		monitor(&x, &y, &w, &h);
+	} else if (opt == 'w') {
+		window(&x, &y, &w, &h);
 	} else {
 		w = scr->width_in_pixels; h = scr->height_in_pixels;
 	}
@@ -117,8 +175,8 @@ main(int argc, char **argv)
 				die("lynx: unable to allocate memory: ");
 			continue;
 		}
-		buf2[len] = '\0'; SWAP(buf1, buf2, char *);
-		SWAP(size1, size2, ssize_t);
+		SWAP(buf1, buf2, char *); SWAP(size1, size2, ssize_t);
+		buf1[len] = '\0';
 	}
 
 	struct stat statbuf;
@@ -127,9 +185,9 @@ main(int argc, char **argv)
 	ispipe = S_ISCHR(statbuf.st_mode);
 	free(buf1); free(buf2);
 
-	xcb_get_image_cookie_t cimg = xcb_get_image(conn,
+	xcb_get_image_cookie_t cimg = xcb_get_image(dpy,
 			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root, x, y, w, h, ~0);
-	xcb_get_image_reply_t *rimg = xcb_get_image_reply(conn, cimg, NULL);
+	xcb_get_image_reply_t *rimg = xcb_get_image_reply(dpy, cimg, NULL);
 	uint8_t *img = xcb_get_image_data(rimg);
 
 	if (!ispipe) {
@@ -161,5 +219,5 @@ main(int argc, char **argv)
 	free(rimg);
 	png_destroy_write_struct(&png, &info);
 	!ispipe ? fclose(file) : pclose(file);
-	xcb_disconnect(conn);
+	xcb_disconnect(dpy);
 }

@@ -12,7 +12,7 @@ WPROFILE = -Wall -Wextra -Wstrict-prototypes -Wmissing-declarations \
 -Wbad-function-cast -Winline -Wundef -Wnested-externs -Wcast-qual -Wshadow \
 -Wwrite-strings -Wno-unused-parameter -Wfloat-equal -Wpedantic -Wno-clobbered
 STD = -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
-LIB = -lpng -lxcb
+LIB = -lpng -lxcb -lxcb-xinerama
 
 CFLAGS = $(WPROFILE) $(STD) -Os
 LDFLAGS = $(LIB)
