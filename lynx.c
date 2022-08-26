@@ -142,7 +142,17 @@ sel(short *x, short *y, short *w, short *h)
 static void
 window(short *x, short *y, short *w, short *h)
 {
+	xcb_get_input_focus_reply_t *focus = xcb_get_input_focus_reply(d,
+			xcb_get_input_focus(d), NULL);
+	xcb_get_geometry_reply_t *geom;
+	if ((geom = xcb_get_geometry_reply(d, xcb_get_geometry(d,
+			focus->focus), NULL)) == NULL)
+		die("lynx: unable to get window geometry\n");
 
+	*x = geom->x, *y = geom->y;
+	*w = geom->width  + 2 * geom->border_width;
+	*h = geom->height + 2 * geom->border_width;
+	free(geom);
 }
 
 int
