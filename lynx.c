@@ -3,18 +3,28 @@
  * see LICENCE file for licensing information */
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <png.h>
 #include <xcb/xcb.h>
 
+#define SWAP(x, y, type)                                                      \
+	x = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
+	y = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
+	x = (type)((uintmax_t)x ^ (uintmax_t)y)
+
 xcb_connection_t *conn;
+FILE *file; bool ispipe;
 
 static void die(const char *fmt, ...);
+static void error(png_structp png, png_const_charp msg);
 
 static void
 die(const char *fmt, ...)
@@ -29,6 +39,13 @@ die(const char *fmt, ...)
 	if (conn != NULL)
 		xcb_disconnect(conn);
 	exit(1);
+}
+
+static void
+error(png_structp png, png_const_charp msg)
+{
+	!ispipe ? fclose(file) : pclose(file);
+	die("lynx: png error: %s\n", msg);
 }
 
 int
@@ -82,39 +99,67 @@ main(int argc, char **argv)
 		w = scr->width_in_pixels; h = scr->height_in_pixels;
 	}
 
+	char *buf1, *buf2;
+	ssize_t size1 = 256, size2 = 256;
+	if ((buf1 = malloc(size1)) == NULL || (buf2 = malloc(size2)) == NULL)
+		die("lynx: unable to allocate memory: ");
+	strcpy(buf1, "/dev/stdout");
+
+	for (;;) {
+		ssize_t len;
+		if ((len = readlink(buf1, buf2, size1 - 1)) == -1) {
+			if (errno == EINVAL)
+				break;
+			die("lynx: unable to read symlink: %s: ", buf1);
+		}
+		if (len == size2 - 1) {
+			if ((buf2 = realloc(buf2, size2 * 2)) == NULL)
+				die("lynx: unable to allocate memory: ");
+			continue;
+		}
+		buf2[len] = '\0'; SWAP(buf1, buf2, char *);
+		SWAP(size1, size2, ssize_t);
+	}
+
+	struct stat statbuf;
+	if (stat(buf1, &statbuf) == -1)
+		die("lynx: unable to stat file: %s: ", buf1);
+	ispipe = S_ISCHR(statbuf.st_mode);
+	free(buf1); free(buf2);
+
 	xcb_get_image_cookie_t cimg = xcb_get_image(conn,
 			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root, x, y, w, h, ~0);
 	xcb_get_image_reply_t *rimg = xcb_get_image_reply(conn, cimg, NULL);
 	uint8_t *img = xcb_get_image_data(rimg);
 
-	FILE *file;
-	if ((file = fopen("/dev/stdout", "wb")) == NULL)
-		die("lynx: unable to open file: %s\n", "/dev/stdout");
+	if (!ispipe) {
+		if ((file = fopen("/dev/stdout", "wb")) == NULL)
+			die("lynx: unable to open file: /dev/stdout: ");
+	} else if ((file = popen("xclip -sel clip -t image/png",
+			"w")) == NULL) {
+		die("lynx: unable to open pipe: ");
+	}
 	png_structp png;
 	if ((png = png_create_write_struct(PNG_LIBPNG_VER_STRING,
 			NULL, NULL, NULL)) == NULL)
-		die("lynx: unable to allocate memory\n");
+		die("lynx: unable to allocate memory: ");
 	png_infop info;
 	if ((info = png_create_info_struct(png)) == NULL)
-		die("lynx: unable to allocate memory\n");
-	png_init_io(png, file);
+		die("lynx: unable to allocate memory: ");
+	png_set_error_fn(png, NULL, error, error);
 	png_set_IHDR(png, info, w, h, 8, PNG_COLOR_TYPE_RGB_ALPHA,
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
 			PNG_FILTER_TYPE_DEFAULT);
+	png_init_io(png, file);
 	png_set_bgr(png);
-
-	if (setjmp(png_jmpbuf(png))) {
-		png_destroy_write_struct(&png, &info);
-		fclose(file);
-		return 1;
-	}
 
 	png_write_info(png, info);
 	for (int i = 0; i < h; ++i)
-		png_write_rows(png, &(unsigned char *){ &img[i * w * 4] }, 1);
+		png_write_rows(png, &(png_bytep){ &img[i * w * 4] }, 1);
 	png_write_end(png, NULL);
-	png_destroy_write_struct(&png, &info);
-	fclose(file);
 
+	free(rimg);
+	png_destroy_write_struct(&png, &info);
+	!ispipe ? fclose(file) : pclose(file);
 	xcb_disconnect(conn);
 }
