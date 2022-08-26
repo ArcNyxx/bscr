@@ -84,6 +84,7 @@ cursor(uint8_t *img, short x, short y, short w, short h)
 				], cur[i * res->width + j]);
 		}
 	}
+	free(res);
 }
 
 static void
@@ -185,6 +186,8 @@ main(int argc, char **argv)
 	for (int i = 0; i < scrnum; ++i) xcb_screen_next(&iter);
 	scr = iter.data;
 
+	if (freeze)
+		xcb_grab_server(dpy);
 	short x = 0, y = 0, w = 0, h = 0;
 	if (opt == 'i') {
 		if (coords == NULL)
@@ -247,6 +250,8 @@ main(int argc, char **argv)
 
 	if (showcur)
 		cursor(img, x, y, w, h);
+	if (freeze)
+		xcb_ungrab_server(dpy);
 
 	if (!ispipe) {
 		if ((file = fopen("/dev/stdout", "wb")) == NULL)
