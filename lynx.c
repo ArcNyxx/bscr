@@ -198,7 +198,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 		die("lynx: unable to grab keyboard\n");
 	free(ver); free(type); free(dock); free(ptr); free(key);
 
-	xcb_generic_event_t *evt; bool left = true;
+	xcb_generic_event_t *evt; bool left = true, press = false;
 	while ((evt = xcb_wait_for_event(conn)) != NULL &&
 			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
 		switch (evt->response_type & ~0x80) {
@@ -206,10 +206,11 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 		case XCB_BUTTON_PRESS: {
 			xcb_button_press_event_t *ev = (void *)evt;
 			*x = ev->root_x; *y = ev->root_y;
-			left = ev->detail == 1;
+			left = ev->detail == 1; press = true;
 			break;
 		}
 		case XCB_KEY_PRESS: {
+			if (!press) break;
 			xcb_key_press_event_t *ev = (void *)evt;
 			switch (xkb_state_key_get_one_sym(state, ev->detail)) {
 			case XKB_KEY_Right:

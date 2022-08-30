@@ -1,0 +1,66 @@
+.\" lynx - screenshot utility
+.\" Copyright (C) 2022 ArcNyxx
+.\" see LICENCE file for licensing information
+.TH LYNX 1 lynx-VERSION
+.SH NAME
+lynx \- screenshot utility
+.SH SYNOPSIS
+.SY lynx
+.OP -acimsw
+[coord]
+.SH DESCRIPTION
+.BR lynx (1)
+is a simple screenshot utility for
+.BR x (7).
+.BR lynx (1)
+can take screenshots with various predefined frames, including the entire
+display, an
+.BR xinerama (3)
+monitor, a window, or a selection of the display chosen with the mouse and
+keyboard.  If
+.I stdout
+is redirected into something other than a character device,
+.BR lynx (1)
+will output PNG data to
+.IR stdout .
+Otherwise,
+.BR lynx (1)
+will output PNG data into an instance of
+.BR xlip (1)
+and save it to the clipboard.
+.SH OPTIONS
+.TP
+.B -a
+Select the entire display.
+.TP
+.B -c
+Draw the cursor in the screenshot.
+.TP
+.BI -i \ coord
+.I coord
+specifies the selection coordinates.  It must be formatted in the following
+manner:
+.RI ' x , y , width , height '.
+.TP
+.B -m
+Select the
+.BR xinerama (3)
+monitor with the cursor on it.
+.TP
+.B -s
+Select a portion of the display.  Drag the cursor to move one corner of the
+selection and use the arrow keys to move the other corner.  Press any other key
+to escape without creating an image.  If the mouse is clicked but not dragged,
+select a window if the left mouse button was pressed and select an
+.BR xinerama (3)
+monitor if the right mouse button was pressed.  This is the default option.
+.TP
+.B -w
+Select the focused window.
+.SH EXIT STATUS
+.BR lynx (1)
+returns with 0 when it writes PNG data and returns with 1 on failure.
+.SH AUTHOR
+Written by ArcNyxx.
+.SH SEE ALSO
+.BR xclip (1)
