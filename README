@@ -1,0 +1,18 @@
+lynx - screenshot utility
+=========================
+lynx is a simple screenshot utility for x.
+
+Requirements
+------------
+lynx requires libpng, libxcb and its extensions, libxkbcommon, and xclip.
+
+Installation
+------------
+lynx comes with a Makefile and config.mk file for configurable building and
+testing.  Edit the latter to match your local setup (lynx is installed into the
+/usr/local namespace by default, you may need to modify your $PATH).
+
+lynx can be built and installed with the following command (run as root):
+
+    make clean install
+
