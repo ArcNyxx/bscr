@@ -1,4 +1,4 @@
-# lynx - screenshot utility
+# bscr - screenshot utility
 # Copyright (C) 2022 ArcNyxx
 # see LICENCE file for licensing information
 

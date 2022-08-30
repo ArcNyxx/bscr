@@ -1,4 +1,4 @@
-# lynx - screenshot utility
+# bscr - screenshot utility
 # Copyright (C) 2022 ArcNyxx
 # see LICENCE file for licensing information
 
@@ -6,37 +6,37 @@
 
 include config.mk
 
-SRC = lynx.c
+SRC = bscr.c
 OBJ = $(SRC:.c=.o)
 
-all: lynx
+all: bscr
 
 $(OBJ): config.mk
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<
 
-lynx: $(OBJ)
+bscr: $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 clean:
-	rm -f lynx $(OBJ) lynx-$(VERSION).tar.gz
+	rm -f bscr $(OBJ) bscr-$(VERSION).tar.gz
 
 dist: clean
-	mkdir -p lynx-$(VERSION)
-	cp -R README LICENCE Makefile config.mk lynx.1 $(SRC) lynx-$(VERSION)
-	tar -cf - lynx-$(VERSION) | gzip -c > lynx-$(VERSION).tar.gz
-	rm -rf lynx-$(VERSION)
+	mkdir -p bscr-$(VERSION)
+	cp -R README LICENCE Makefile config.mk bscr.1 $(SRC) bscr-$(VERSION)
+	tar -cf - bscr-$(VERSION) | gzip -c > bscr-$(VERSION).tar.gz
+	rm -rf bscr-$(VERSION)
 
 install: all
 	mkdir -p $(PREFIX)/bin $(MANPREFIX)/man1
-	cp -f lynx $(PREFIX)/bin
-	chmod 754 $(PREFIX)/bin/lynx
-	sed 's/VERSION/$(VERSION)/g' < lynx.1 > $(MANPREFIX)/man1/lynx.1
-	chmod 644 $(MANPREFIX)/man1/lynx.1
+	cp -f bscr $(PREFIX)/bin
+	chmod 754 $(PREFIX)/bin/bscr
+	sed 's/VERSION/$(VERSION)/g' < bscr.1 > $(MANPREFIX)/man1/bscr.1
+	chmod 644 $(MANPREFIX)/man1/bscr.1
 
 uninstall:
-	rm -f $(PREFIX)/bin/lynx $(MANPREFIX)/man1/lynx.1
+	rm -f $(PREFIX)/bin/bscr $(MANPREFIX)/man1/bscr.1
 
 .PHONY: all clean dist install uninstall
 

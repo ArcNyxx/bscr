@@ -1,4 +1,4 @@
-/* lynx - screenshot utility
+/* bscr - screenshot utility
  * Copyright (C) 2022 ArcNyxx
  * see LICENCE file for licensing information */
 
@@ -51,7 +51,7 @@ cursor(uint32_t *img, int16_t x, int16_t y, int16_t w, int16_t h)
 	xcb_xfixes_query_version_reply_t *ver;
 	if ((ver = xcb_xfixes_query_version_reply(conn,
 			xcb_xfixes_query_version(conn, ~0, ~0), NULL)) == NULL)
-		die("lynx: unable to use xfixes\n");
+		die("bscr: unable to use xfixes\n");
 	free(ver);
 
 	xcb_xfixes_get_cursor_image_reply_t *res =
@@ -92,7 +92,7 @@ die(const char *fmt, ...)
 static void
 error(png_structp png, png_const_charp msg)
 {
-	die("lynx: unable to write png data: %s\n", msg);
+	die("bscr: unable to write png data: %s\n", msg);
 }
 
 static void
@@ -102,7 +102,7 @@ mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 	if ((ver = xcb_xinerama_query_version_reply(conn,
 			xcb_xinerama_query_version(conn, ~0, ~0),
 			NULL)) == NULL)
-		die("lynx: unable to use xinerama\n");
+		die("bscr: unable to use xinerama\n");
 	free(ver);
 
 	xcb_xinerama_query_screens_reply_t *info;
@@ -114,7 +114,7 @@ mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 		if ((ptr = xcb_query_pointer_reply(conn,
 				xcb_query_pointer(conn, scr->root),
 				NULL)) == NULL)
-			die("lynx: unable to query pointer\n");
+			die("bscr: unable to query pointer\n");
 		*x = ptr->root_x; *y = ptr->root_y;
 		free(ptr);
 	}
@@ -163,39 +163,39 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 
 	xcb_xkb_use_extension_reply_t *ver;
 	if ((ver = xcb_xkb_use_extension_reply(conn, cver, NULL)) == NULL)
-		die("lynx: unable to use xkb\n");
+		die("bscr: unable to use xkb\n");
 	if (xkb_x11_setup_xkb_extension(conn, XKB_X11_MIN_MAJOR_XKB_VERSION,
 			XKB_X11_MIN_MINOR_XKB_VERSION,
 			XKB_X11_SETUP_XKB_EXTENSION_NO_FLAGS,
 			NULL, NULL, NULL, NULL) == 0)
-		die("lynx: unable to set up xkb\n");
+		die("bscr: unable to set up xkb\n");
 	struct xkb_context *ctx;
 	if ((ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS)) == NULL)
-		die("lynx: unable to get xkb context\n");
+		die("bscr: unable to get xkb context\n");
 	int32_t keydev;
 	if ((keydev = xkb_x11_get_core_keyboard_device_id(conn)) == -1)
-		die("lynx: unable to get keyboard device\n");
+		die("bscr: unable to get keyboard device\n");
 	struct xkb_keymap *map;
 	if ((map = xkb_x11_keymap_new_from_device(ctx, conn, keydev,
 			XKB_KEYMAP_COMPILE_NO_FLAGS)) == NULL)
-		die("lynx: unable to make keymap\n");
+		die("bscr: unable to make keymap\n");
 	struct xkb_state *state;
 	if ((state = xkb_x11_state_new_from_device(map, conn, keydev)) == NULL)
-		die("lynx: unable to make state\n");
+		die("bscr: unable to make state\n");
 
 	xcb_intern_atom_reply_t *type, *dock;
 	if ((type = xcb_intern_atom_reply(conn, ctype, NULL)) == NULL)
-		die("lynx: unable to get atom\n");
+		die("bscr: unable to get atom\n");
 	if ((dock = xcb_intern_atom_reply(conn, cdock, NULL)) == NULL)
-		die("lynx: unable to get atom\n");
+		die("bscr: unable to get atom\n");
 	xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, type->atom,
 			XCB_ATOM_ATOM, 32, 1, &dock->atom);
 	xcb_grab_pointer_reply_t *ptr;
 	if ((ptr = xcb_grab_pointer_reply(conn, cptr, NULL)) == NULL)
-		die("lynx: unable to grab pointer\n");
+		die("bscr: unable to grab pointer\n");
 	xcb_grab_keyboard_reply_t *key;
 	if ((key = xcb_grab_keyboard_reply(conn, ckey, NULL)) == NULL)
-		die("lynx: unable to grab keyboard\n");
+		die("bscr: unable to grab keyboard\n");
 	free(ver); free(type); free(dock); free(ptr); free(key);
 
 	xcb_generic_event_t *evt; bool left = true, press = false;
@@ -226,7 +226,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 				if (*y != 0) --*y;
 				break;
 			default:
-				die("lynx: key pressed\n");
+				die("bscr: key pressed\n");
 			}
 		}
 			/* FALLTHROUGH */
@@ -278,7 +278,7 @@ win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 			if ((ptr = xcb_query_pointer_reply(conn,
 					xcb_query_pointer(conn, win),
 					NULL)) == NULL)
-				die("lynx: unable to query pointer\n");
+				die("bscr: unable to query pointer\n");
 			if (ptr->child == 0)
 				break;
 			win = ptr->child;
@@ -290,7 +290,7 @@ win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 	xcb_get_geometry_reply_t *geom;
 	if ((geom = xcb_get_geometry_reply(conn,
 			xcb_get_geometry(conn, win), NULL)) == NULL)
-		die("lynx: unable to get geometry\n");
+		die("bscr: unable to get geometry\n");
 	*x = geom->x, *y = geom->y;
 	*w = geom->width  + 2 * geom->border_width;
 	*h = geom->height + 2 * geom->border_width;
@@ -320,7 +320,7 @@ main(int argc, char **argv)
 				opt = optstr[i];
 				break;
 			default:
-				die("lynx: invalid option: -%c\n", optstr[i]);
+				die("bscr: invalid option: -%c\n", optstr[i]);
 			}
 	}
 
@@ -335,17 +335,17 @@ main(int argc, char **argv)
 	int16_t x = 0, y = 0, w = 0, h = 0;
 	if (opt == 'i') {
 		if (coords == NULL)
-			die("lynx: must supply option with -i argument\n");
+			die("bscr: must supply option with -i argument\n");
 		int16_t arr[3];
 		char *start = coords, *end;
 		for (int i = 0; i < 3; ++i, start = ++end) {
 			arr[i] = strtoul(start, &end, 10);
 			if (*end != ',' || !isdigit(*start))
-				die("lynx: invalid option: %s\n", coords);
+				die("bscr: invalid option: %s\n", coords);
 		}
 		h = strtoul(start, &end, 10);
 		if (*end != '\0' || !isdigit(*start))
-			die("lynx: invalid option: %s\n", coords);
+			die("bscr: invalid option: %s\n", coords);
 		x = arr[0], y = arr[1], w = arr[2];
 	} else if (opt == 'm') {
 		mon(&x, &y, &w, &h, true);
@@ -367,7 +367,7 @@ main(int argc, char **argv)
 	if ((res = xcb_get_image_reply(conn, xcb_get_image(conn,
 			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root,
 			x, y, w, h, ~0), NULL)) == NULL)
-		die("lynx: unable to get image\n");
+		die("bscr: unable to get image\n");
 	uint32_t *img = (uint32_t *)xcb_get_image_data(res);
 
 	if (showcur)
@@ -376,7 +376,7 @@ main(int argc, char **argv)
 	char *buf1, *buf2;
 	ssize_t size1 = 256, size2 = 256;
 	if ((buf1 = malloc(size1)) == NULL || (buf2 = malloc(size2)) == NULL)
-		die("lynx: unable to allocate memory: ");
+		die("bscr: unable to allocate memory: ");
 	strcpy(buf1, "/dev/stdout");
 
 	for (;;) {
@@ -384,11 +384,11 @@ main(int argc, char **argv)
 		if ((len = readlink(buf1, buf2, size2 - 1)) == -1) {
 			if (errno == EINVAL)
 				break; /* EINVAL for non-links, finish */
-			die("lynx: unable to read symlink: %s: ", buf1);
+			die("bscr: unable to read symlink: %s: ", buf1);
 		}
 		if (len == size2 - 1) {
 			if ((buf2 = realloc(buf2, size2 * 2)) == NULL)
-				die("lynx: unable to allocate memory: ");
+				die("bscr: unable to allocate memory: ");
 			continue; /* not enough room, try again */
 		}
 
@@ -400,21 +400,21 @@ main(int argc, char **argv)
 
 	struct stat statbuf;
 	if (stat(buf1, &statbuf) == -1)
-		die("lynx: unable to stat file: %s: ", buf1);
+		die("bscr: unable to stat file: %s: ", buf1);
 	free(buf1); free(buf2);
 	if ((device = S_ISCHR(statbuf.st_mode))) {
 		if ((fp = popen("xclip -sel clip -t image/png", "w")) == NULL)
-			die("lynx: unable to open pipe: ");
+			die("bscr: unable to open pipe: ");
 	} else if ((fp = fopen("/dev/stdout", "wb")) == NULL) {
-		die("lynx: unable to open file: /dev/stdout: ");
+		die("bscr: unable to open file: /dev/stdout: ");
 	}
 
 	png_structp png; png_infop info;
 	if ((png = png_create_write_struct(PNG_LIBPNG_VER_STRING,
 			NULL, NULL, NULL)) == NULL)
-		die("lynx: unable to allocate memory: ");
+		die("bscr: unable to allocate memory: ");
 	if ((info = png_create_info_struct(png)) == NULL)
-		die("lynx: unable to allocate memory: ");
+		die("bscr: unable to allocate memory: ");
 	png_set_error_fn(png, NULL, error, error);
 	png_set_IHDR(png, info, w, h, 8, PNG_COLOR_TYPE_RGB_ALPHA,
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
