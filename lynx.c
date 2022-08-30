@@ -134,13 +134,31 @@ monitor(short *x, short *y, short *w, short *h)
 static void
 sel(short *x, short *y, short *w, short *h)
 {
+#define WINMASK XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK
+#define EVTMASK XCB_EVENT_MASK_EXPOSURE
+#define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
+	XCB_EVENT_MASK_BUTTON_MOTION
+
 	xcb_window_t win = xcb_generate_id(d);
 	xcb_create_window(d, XCB_COPY_FROM_PARENT, win, scr->root, 0, 0,
 			*w, *h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-			scr->root_visual, 0, NULL);
+			scr->root_visual, WINMASK,
+			(uint32_t []){ true, EVTMASK | MASK });
+	xcb_gcontext_t gc = xcb_generate_id(d);
+	xcb_create_gc(d, gc, win, XCB_GC_FOREGROUND,
+			(void *){ &scr->white_pixel });
 
-#define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
-	XCB_EVENT_MASK_BUTTON_MOTION
+	xcb_intern_atom_cookie_t ctatom, cdatom;
+	xcb_intern_atom_reply_t *rtatom, *rdatom;
+	ctatom = xcb_intern_atom(d, false, 19, "_NET_WM_WINDOW_TYPE");
+	cdatom = xcb_intern_atom(d, false, 24, "_NET_WM_WINDOW_TYPE_DOCK");
+	if ((rtatom = xcb_intern_atom_reply(d, ctatom, NULL)) == NULL)
+		die("lynx: unable to get atom\n");
+	if ((rdatom = xcb_intern_atom_reply(d, cdatom, NULL)) == NULL)
+		die("lynx: unable to get atom\n");
+	xcb_change_property(d, XCB_PROP_MODE_REPLACE, win, rtatom->atom,
+			XCB_ATOM_ATOM, 32, 1, (void *){ &rdatom->atom });
+
 	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(d, false, scr->root,
 			MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
 			XCB_NONE, XCB_NONE, XCB_CURRENT_TIME);
@@ -155,6 +173,8 @@ sel(short *x, short *y, short *w, short *h)
 		die("lynx: unable to grab keyboard\n");
 	free(ptr); free(key);
 
+			xcb_map_window(d, win);
+
 	xcb_generic_event_t *evt;
 	while ((evt = xcb_wait_for_event(d)) != NULL &&
 			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
@@ -165,16 +185,30 @@ sel(short *x, short *y, short *w, short *h)
 			*x = ev->root_x, *y = ev->root_y;
 			break;
 		}
-		case XCB_MOTION_NOTIFY: {
+		case XCB_MOTION_NOTIFY: ;
 			xcb_motion_notify_event_t *ev =
 					(xcb_motion_notify_event_t *)evt;
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
+			/* FALLTHROUGH */
+
+			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
+			if (sw < 0) sx += sw, sw = -sw;
+			if (sh < 0) sy += sh, sh = -sh;
+			const xcb_point_t pts[5] = { { sx, sy }, { sw, 0 },
+					{ 0, sh }, { -sw, 0 }, { 0, -sh } };
+			xcb_poly_line(d, XCB_COORD_MODE_PREVIOUS, win, gc, 5,
+					pts);
+		case XCB_EXPOSE: ;
+			xcb_flush(d);
 			break;
-		}
+		default: break;
 		}
 		free(evt);
 	}
 	free(evt);
+
+	if (*w < 0) *x += *w, *w = -*w;
+	if (*h < 0) *y += *h, *h = -*h;
 }
 
 static void
@@ -186,7 +220,6 @@ window(short *x, short *y, short *w, short *h)
 	if ((geom = xcb_get_geometry_reply(d, xcb_get_geometry(d,
 			focus->focus), NULL)) == NULL)
 		die("lynx: unable to get window geometry\n");
-
 	*x = geom->x, *y = geom->y;
 	*w = geom->width  + 2 * geom->border_width;
 	*h = geom->height + 2 * geom->border_width;
