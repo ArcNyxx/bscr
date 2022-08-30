@@ -17,11 +17,6 @@
 #include <xcb/xfixes.h>
 #include <xcb/xinerama.h>
 
-#define SWAP(x, y, type)                                                      \
-	x = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
-	y = (type)((uintmax_t)x ^ (uintmax_t)y),                              \
-	x = (type)((uintmax_t)x ^ (uintmax_t)y)
-
 xcb_connection_t *d;
 xcb_screen_t *scr;
 FILE *file = NULL; bool ispipe;
@@ -138,12 +133,6 @@ sel(short *x, short *y, short *w, short *h)
 #define EVTMASK XCB_EVENT_MASK_EXPOSURE
 #define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
 	XCB_EVENT_MASK_BUTTON_MOTION
-
-        xcb_shape_query_version_reply_t *qver;
-        if ((qver = xcb_shape_query_version_reply(d,
-                        xcb_shape_query_version(d), NULL)) == NULL)
-                die("lynx: unable to use xinerama\n");
-        free(qver);
 
 	xcb_window_t win = xcb_generate_id(d);
 	xcb_create_window(d, scr->root_depth, win, scr->root, 0, 0,
@@ -339,8 +328,10 @@ main(int argc, char **argv)
 				die("lynx: unable to allocate memory: ");
 			continue; /* not enough room, try again */
 		}
-		SWAP(buf1, buf2, char *);
-		SWAP(size1, size2, ssize_t);
+
+		uintptr_t *tmp1 = (void *)&buf1, *tmp2 = (void *)&buf2;
+		*tmp1 ^= *tmp2, *tmp2 ^= *tmp1, *tmp1 ^= *tmp2;
+		size1 ^= size2, size2 ^= size1, size1 ^= size2;
 		buf1[len] = '\0';
 	}
 
