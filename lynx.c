@@ -227,7 +227,9 @@ sel(short *x, short *y, short *w, short *h)
 	xcb_unmap_window(d, win);
 
 	if (*w < 0) *x += *w, *w = -*w;
+	++*w;
 	if (*h < 0) *y += *h, *h = -*h;
+	++*h;
 }
 
 static void
@@ -249,12 +251,15 @@ int
 main(int argc, char **argv)
 {
 	char opt = 's', *coords = NULL;
-	bool showcur = false, freeze = false;
+	bool showcur = false;
 	if (*(argv = &argv[1]) != NULL && (*argv)[0] == '-') {
 		bool end = false; /* ensure defined behaviour NULL bound */
 		char *optstr = *argv;
 		for (int i = 1; optstr[i] != '\0'; ++i)
 			switch (optstr[i]) {
+			case 'c':
+				showcur = true;
+				break;
 			case 'i':
 				if (!end && (coords =
 						*(argv = &argv[1])) == NULL)
@@ -265,12 +270,6 @@ main(int argc, char **argv)
 			case 's':
 			case 'w':
 				opt = optstr[i];
-				break;
-			case 'c':
-				showcur = !showcur;
-				break;
-			case 'f':
-				freeze = !freeze;
 				break;
 			default:
 				die("lynx: invalid option: -%c\n", optstr[i]);
@@ -287,8 +286,6 @@ main(int argc, char **argv)
 
 	int16_t x = 0, y = 0,
 			w = scr->width_in_pixels, h = scr->height_in_pixels;
-	if (freeze)
-		xcb_grab_server(d);
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("lynx: must supply option with -i argument\n");
@@ -323,8 +320,6 @@ main(int argc, char **argv)
 
 	if (showcur)
 		cursor(img, x, y, w, h);
-	if (freeze)
-		xcb_ungrab_server(d);
 
 	char *buf1, *buf2;
 	ssize_t size1 = 256, size2 = 256;
