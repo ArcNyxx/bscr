@@ -29,7 +29,7 @@ static void cursor(uint32_t *img, int16_t x, int16_t y, int16_t w, int16_t h);
 static void die(const char *fmt, ...);
 static void error(png_structp png, png_const_charp msg);
 static void mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query);
-static void sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h);
+static bool sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h);
 static void win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query);
 
 static void
@@ -107,39 +107,43 @@ mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 
 	xcb_xinerama_query_screens_reply_t *info;
 	if ((info = xcb_xinerama_query_screens_reply(conn,
-			xcb_xinerama_query_screens(conn), NULL)) == NULL) {
-		free(info);
+			xcb_xinerama_query_screens(conn), NULL)) == NULL)
 		return;
-	}
-	xcb_xinerama_screen_info_iterator_t iter =
-			xcb_xinerama_query_screens_screen_info_iterator(info);
 	if (query) {
-		xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(conn,
-				xcb_query_pointer(conn, scr->root), NULL);
+		xcb_query_pointer_reply_t *ptr;
+		if ((ptr = xcb_query_pointer_reply(conn,
+				xcb_query_pointer(conn, scr->root),
+				NULL)) == NULL)
+			die("lynx: unable to query pointer\n");
 		*x = ptr->root_x; *y = ptr->root_y;
 		free(ptr);
 	}
 
+	xcb_xinerama_screen_info_iterator_t iter =
+			xcb_xinerama_query_screens_screen_info_iterator(info);
 	while (iter.rem > 0) {
-		xcb_xinerama_screen_info_next(&iter);
-		const xcb_xinerama_screen_info_t *data = iter.data;
-		if (*x >= data->x_org && *y >= data->y_org &&
-				*x <= data->x_org + data->width &&
-				*y <= data->y_org + data->height) {
-			*x = data->x_org; *y = data->y_org;
-			*w = data->width; *h = data->height;
+		if (*x >= iter.data->x_org && *y >= iter.data->y_org &&
+				*x <= iter.data->x_org + iter.data->width &&
+				*y <= iter.data->y_org + iter.data->height) {
+			*x = iter.data->x_org; *y = iter.data->y_org;
+			*w = iter.data->width; *h = iter.data->height;
 			break;
 		}
+		xcb_xinerama_screen_info_next(&iter);
 	}
 	free(info);
+
+	if (*w == 0 || *h == 0)
+		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
 }
 
-static void
+static bool
 sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 {
 	xcb_window_t win = xcb_generate_id(conn);
-	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0, *w, *h,
-			0, XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
+	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0,
+			scr->width_in_pixels, scr->height_in_pixels, 0,
+			XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
 			XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT,
 			(uint32_t []){ scr->white_pixel, true });
 
@@ -184,8 +188,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 		die("lynx: unable to get atom\n");
 	if ((dock = xcb_intern_atom_reply(conn, cdock, NULL)) == NULL)
 		die("lynx: unable to get atom\n");
-	xcb_void_cookie_t cprop = xcb_change_property(conn,
-			XCB_PROP_MODE_REPLACE, win, type->atom,
+	xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, type->atom,
 			XCB_ATOM_ATOM, 32, 1, &dock->atom);
 	xcb_grab_pointer_reply_t *ptr;
 	if ((ptr = xcb_grab_pointer_reply(conn, cptr, NULL)) == NULL)
@@ -195,13 +198,15 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 		die("lynx: unable to grab keyboard\n");
 	free(ver); free(type); free(dock); free(ptr); free(key);
 
-	xcb_generic_event_t *evt;
+	xcb_generic_event_t *evt; bool left = true;
 	while ((evt = xcb_wait_for_event(conn)) != NULL &&
 			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
 		switch (evt->response_type & ~0x80) {
+		default: break;
 		case XCB_BUTTON_PRESS: {
 			xcb_button_press_event_t *ev = (void *)evt;
 			*x = ev->root_x; *y = ev->root_y;
+			left = ev->detail == 1;
 			break;
 		}
 		case XCB_KEY_PRESS: {
@@ -228,37 +233,31 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			xcb_motion_notify_event_t *ev =
 					(xcb_motion_notify_event_t *)evt;
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
-
 			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
 			if (sw < 0) sx += sw, sw = -sw;
 			if (sh < 0) sy += sh, sh = -sh;
-	const xcb_rectangle_t arr[4] = { { sx, sy, 1, sh }, { sx + sw, sy, 1, sh },
-                                { sx, sy, sw, 1 }, { sx, sy + sh, sw, 1 } };
-	xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
-			0, win, 0, 0, 4, arr);
-	xcb_map_window(conn, win);
-
-
-
-
-
-
-
-			/* FALLTHROUGH */
-		case XCB_EXPOSE: ;
+			xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET,
+					XCB_SHAPE_SK_BOUNDING, 0, win, 0, 0, 4,
+					(xcb_rectangle_t []){
+				{ sx, sy, 1, sh }, { sx + sw, sy, 1, sh },
+				{ sx, sy, sw, 1 }, { sx, sy + sh, sw, 1 }
+			});
+			xcb_map_window(conn, win);
 			xcb_flush(conn);
-			break;
-		default: break;
 		}
 		free(evt);
 	}
 	free(evt);
 
+	xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
+	xcb_ungrab_keyboard(conn, XCB_CURRENT_TIME);
 	xcb_unmap_window(conn, win);
+	xcb_flush(conn);
 
 	if (*w < 0) *x += *w, *w = -*w;
 	if (*h < 0) *y += *h, *h = -*h;
-	++*w; ++*h;
+	nanosleep(&(struct timespec){ .tv_nsec = 2E8 }, NULL);
+	return left;
 }
 
 static void
@@ -279,8 +278,9 @@ win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 					xcb_query_pointer(conn, win),
 					NULL)) == NULL)
 				die("lynx: unable to query pointer\n");
-			if (ptr->same_screen)
+			if (ptr->child == 0)
 				break;
+			win = ptr->child;
 			free(ptr);
 		}
 		free(ptr);
@@ -331,8 +331,7 @@ main(int argc, char **argv)
 		xcb_screen_next(&iter);
 	scr = iter.data;
 
-	int16_t x = 0, y = 0,
-			w = scr->width_in_pixels, h = scr->height_in_pixels;
+	int16_t x = 0, y = 0, w = 0, h = 0;
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("lynx: must supply option with -i argument\n");
@@ -350,9 +349,17 @@ main(int argc, char **argv)
 	} else if (opt == 'm') {
 		mon(&x, &y, &w, &h, true);
 	} else if (opt == 's') {
-		sel(&x, &y, &w, &h);
+		bool left = sel(&x, &y, &w, &h);
+		if (w != 0 && h != 0)
+			++w, ++h;
+		else if (left)
+			win(&x, &y, &w, &h, false);
+		else
+			mon(&x, &y, &w, &h, false);
 	} else if (opt == 'w') {
 		win(&x, &y, &w, &h, true);
+	} else {
+		w = scr->width_in_pixels; h = scr->height_in_pixels;
 	}
 
 	xcb_get_image_reply_t *res;
