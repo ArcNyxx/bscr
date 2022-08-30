@@ -17,17 +17,17 @@
 #include <xcb/xfixes.h>
 #include <xcb/xinerama.h>
 
-xcb_connection_t *d;
+xcb_connection_t *conn;
 xcb_screen_t *scr;
-FILE *file = NULL; bool ispipe;
+FILE *fp = NULL; bool device;
 
 static void blend(uint32_t *dest, uint32_t source);
 static void cursor(uint32_t *img, short x, short y, short w, short h);
 static void die(const char *fmt, ...);
 static void error(png_structp png, png_const_charp msg);
-static void monitor(short *x, short *y, short *w, short *h);
+static void monitor(short *x, short *y, short *w, short *h, bool query);
 static void sel(short *x, short *y, short *w, short *h);
-static void window(short *x, short *y, short *w, short *h);
+static void window(short *x, short *y, short *w, short *h, bool query);
 
 static void
 blend(uint32_t *dest, uint32_t source)
@@ -46,14 +46,14 @@ static void
 cursor(uint32_t *img, short x, short y, short w, short h)
 {
 	xcb_xfixes_query_version_reply_t *qver;
-	if ((qver = xcb_xfixes_query_version_reply(d,
-			xcb_xfixes_query_version(d, ~0, ~0), NULL)) == NULL)
+	if ((qver = xcb_xfixes_query_version_reply(conn,
+			xcb_xfixes_query_version(conn, ~0, ~0), NULL)) == NULL)
 		die("lynx: unable to use xfixes\n");
 	free(qver);
 
 	xcb_xfixes_get_cursor_image_reply_t *res =
-			xcb_xfixes_get_cursor_image_reply(d,
-			xcb_xfixes_get_cursor_image(d), NULL);
+			xcb_xfixes_get_cursor_image_reply(conn,
+			xcb_xfixes_get_cursor_image(conn), NULL);
 	uint32_t *cur = xcb_xfixes_get_cursor_image_cursor_image(res);
 	for (int i = 0; i < res->height; ++i) {
 		for (int j = 0; j < res->width; ++j) {
@@ -79,10 +79,10 @@ die(const char *fmt, ...)
 
 	if (fmt[strlen(fmt) - 1] != '\n')
 		perror(NULL);
-	if (file != NULL)
-		!ispipe ? fclose(file) : pclose(file);
-	if (d != NULL)
-		xcb_disconnect(d);
+	if (fp != NULL)
+		!device ? fclose(fp) : pclose(fp);
+	if (conn != NULL)
+		xcb_disconnect(conn);
 	exit(1);
 }
 
@@ -93,37 +93,42 @@ error(png_structp png, png_const_charp msg)
 }
 
 static void
-monitor(short *x, short *y, short *w, short *h)
+monitor(short *x, short *y, short *w, short *h, bool query)
 {
 	xcb_xinerama_query_version_reply_t *qver;
-	if ((qver = xcb_xinerama_query_version_reply(d,
-			xcb_xinerama_query_version(d, ~0, ~0), NULL)) == NULL)
+	if ((qver = xcb_xinerama_query_version_reply(conn,
+			xcb_xinerama_query_version(conn, ~0, ~0),
+			NULL)) == NULL)
 		die("lynx: unable to use xinerama\n");
 	free(qver);
 
 	xcb_xinerama_query_screens_reply_t *info;
-	if ((info = xcb_xinerama_query_screens_reply(d,
-			xcb_xinerama_query_screens(d), NULL)) == NULL) {
+	if ((info = xcb_xinerama_query_screens_reply(conn,
+			xcb_xinerama_query_screens(conn), NULL)) == NULL) {
 		free(info);
 		return;
 	}
-
-	xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(d,
-			xcb_query_pointer(d, scr->root), NULL);
 	xcb_xinerama_screen_info_iterator_t iter =
 			xcb_xinerama_query_screens_screen_info_iterator(info);
+	if (query) {
+		xcb_query_pointer_reply_t *ptr = xcb_query_pointer_reply(conn,
+				xcb_query_pointer(conn, scr->root), NULL);
+		*x = ptr->root_x; *y = ptr->root_y;
+		free(ptr);
+	}
+
 	while (iter.rem > 0) {
 		xcb_xinerama_screen_info_next(&iter);
 		const xcb_xinerama_screen_info_t *data = iter.data;
-		if (ptr->root_x >= data->x_org && ptr->root_y >= data->y_org &&
-				ptr->root_x <= data->x_org + data->width &&
-				ptr->root_y <= data->y_org + data->height) {
+		if (*x >= data->x_org && *y >= data->y_org &&
+				*x <= data->x_org + data->width &&
+				*y <= data->y_org + data->height) {
 			*x = data->x_org; *y = data->y_org;
 			*w = data->width; *h = data->height;
 			break;
 		}
 	}
-	free(info); free(ptr);
+	free(info);
 }
 
 static void
@@ -134,41 +139,41 @@ sel(short *x, short *y, short *w, short *h)
 #define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
 	XCB_EVENT_MASK_BUTTON_MOTION
 
-	xcb_window_t win = xcb_generate_id(d);
-	xcb_create_window(d, scr->root_depth, win, scr->root, 0, 0,
+	xcb_window_t win = xcb_generate_id(conn);
+	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0,
 			*w, *h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			scr->root_visual, WINMASK,
 			(uint32_t []){ scr->white_pixel, true, EVTMASK | MASK });
 
 	xcb_intern_atom_cookie_t ctatom, cdatom;
 	xcb_intern_atom_reply_t *rtatom, *rdatom;
-	ctatom = xcb_intern_atom(d, false, 19, "_NET_WM_WINDOW_TYPE");
-	cdatom = xcb_intern_atom(d, false, 24, "_NET_WM_WINDOW_TYPE_DOCK");
-	if ((rtatom = xcb_intern_atom_reply(d, ctatom, NULL)) == NULL)
+	ctatom = xcb_intern_atom(conn, false, 19, "_NET_WM_WINDOW_TYPE");
+	cdatom = xcb_intern_atom(conn, false, 24, "_NET_WM_WINDOW_TYPE_DOCK");
+	if ((rtatom = xcb_intern_atom_reply(conn, ctatom, NULL)) == NULL)
 		die("lynx: unable to get atom\n");
-	if ((rdatom = xcb_intern_atom_reply(d, cdatom, NULL)) == NULL)
+	if ((rdatom = xcb_intern_atom_reply(conn, cdatom, NULL)) == NULL)
 		die("lynx: unable to get atom\n");
-	xcb_change_property(d, XCB_PROP_MODE_REPLACE, win, rtatom->atom,
+	xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, rtatom->atom,
 			XCB_ATOM_ATOM, 32, 1, (void *){ &rdatom->atom });
 
 
-	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(d, false, scr->root,
-			MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(conn, false,
+			scr->root, MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
 			XCB_NONE, XCB_NONE, XCB_CURRENT_TIME);
-	xcb_grab_keyboard_cookie_t ckey = xcb_grab_keyboard(d,
+	xcb_grab_keyboard_cookie_t ckey = xcb_grab_keyboard(conn,
 			false, scr->root, XCB_CURRENT_TIME,
 			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
 	xcb_grab_pointer_reply_t *ptr;
-	if ((ptr = xcb_grab_pointer_reply(d, cptr, NULL)) == NULL)
+	if ((ptr = xcb_grab_pointer_reply(conn, cptr, NULL)) == NULL)
 		die("lynx: unable to grab pointer\n");
 	xcb_grab_keyboard_reply_t *key;
-	if ((key = xcb_grab_keyboard_reply(d, ckey, NULL)) == NULL)
+	if ((key = xcb_grab_keyboard_reply(conn, ckey, NULL)) == NULL)
 		die("lynx: unable to grab keyboard\n");
 	free(ptr); free(key);
 
 
 	xcb_generic_event_t *evt;
-	while ((evt = xcb_wait_for_event(d)) != NULL &&
+	while ((evt = xcb_wait_for_event(conn)) != NULL &&
 			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
 		switch (evt->response_type & ~0x80) {
 		case XCB_BUTTON_PRESS: {
@@ -193,9 +198,9 @@ sel(short *x, short *y, short *w, short *h)
 
 	const xcb_rectangle_t arr[4] = { { sx, sy, 1, sh }, { sx + sw, sy, 1, sh },
                                 { sx, sy, sw, 1 }, { sx, sy + sh, sw, 1 } };
-	xcb_shape_rectangles(d, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
+	xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
 			0, win, 0, 0, 4, arr);
-	xcb_map_window(d, win);
+	xcb_map_window(conn, win);
 
 
 
@@ -205,7 +210,7 @@ sel(short *x, short *y, short *w, short *h)
 
 			/* FALLTHROUGH */
 		case XCB_EXPOSE: ;
-			xcb_flush(d);
+			xcb_flush(conn);
 			break;
 		default: break;
 		}
@@ -213,7 +218,7 @@ sel(short *x, short *y, short *w, short *h)
 	}
 	free(evt);
 
-	xcb_unmap_window(d, win);
+	xcb_unmap_window(conn, win);
 
 	if (*w < 0) *x += *w, *w = -*w;
 	++*w;
@@ -222,14 +227,34 @@ sel(short *x, short *y, short *w, short *h)
 }
 
 static void
-window(short *x, short *y, short *w, short *h)
+window(short *x, short *y, short *w, short *h, bool query)
 {
-	xcb_get_input_focus_reply_t *focus = xcb_get_input_focus_reply(d,
-			xcb_get_input_focus(d), NULL);
+	xcb_window_t win = scr->root;
+	if (query) {
+		xcb_get_input_focus_reply_t *focus;
+		if ((focus = xcb_get_input_focus_reply(conn,
+				xcb_get_input_focus(conn), NULL)) != NULL) {
+			win = focus->focus;
+			free(focus);
+		}
+	} else {
+		xcb_query_pointer_reply_t *ptr;
+		for (;;) {
+			if ((ptr = xcb_query_pointer_reply(conn,
+					xcb_query_pointer(conn, win),
+					NULL)) == NULL)
+				die("lynx: unable to query pointer\n");
+			if (ptr->same_screen)
+				break;
+			free(ptr);
+		}
+		free(ptr);
+	}
+
 	xcb_get_geometry_reply_t *geom;
-	if ((geom = xcb_get_geometry_reply(d, xcb_get_geometry(d,
-			focus->focus), NULL)) == NULL)
-		die("lynx: unable to get window geometry\n");
+	if ((geom = xcb_get_geometry_reply(conn,
+			xcb_get_geometry(conn, win), NULL)) == NULL)
+		die("lynx: unable to get geometry\n");
 	*x = geom->x, *y = geom->y;
 	*w = geom->width  + 2 * geom->border_width;
 	*h = geom->height + 2 * geom->border_width;
@@ -266,8 +291,8 @@ main(int argc, char **argv)
 	}
 
 	int screen;
-	d = xcb_connect(NULL, &screen);
-	const xcb_setup_t *setup = xcb_get_setup(d);
+	conn = xcb_connect(NULL, &screen);
+	const xcb_setup_t *setup = xcb_get_setup(conn);
 	xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
 	for (int i = 0; i < screen; ++i)
 		xcb_screen_next(&iter);
@@ -291,17 +316,15 @@ main(int argc, char **argv)
 			die("lynx: invalid option: %s\n", coords);
 		x = arr[0], y = arr[1], w = arr[2];
 	} else if (opt == 'm') {
-		monitor(&x, &y, &w, &h);
+		monitor(&x, &y, &w, &h, true);
 	} else if (opt == 's') {
 		sel(&x, &y, &w, &h);
 	} else if (opt == 'w') {
-		window(&x, &y, &w, &h);
+		window(&x, &y, &w, &h, true);
 	}
 
-	fprintf(stderr, "%hd %hd %hd %hd\n", x, y, w, h);
-
 	xcb_get_image_reply_t *res;
-	if ((res = xcb_get_image_reply(d, xcb_get_image(d,
+	if ((res = xcb_get_image_reply(conn, xcb_get_image(conn,
 			XCB_IMAGE_FORMAT_Z_PIXMAP, scr->root,
 			x, y, w, h, ~0), NULL)) == NULL)
 		die("lynx: unable to get image\n");
@@ -318,7 +341,7 @@ main(int argc, char **argv)
 
 	for (;;) {
 		ssize_t len;
-		if ((len = readlink(buf1, buf2, size1 - 1)) == -1) {
+		if ((len = readlink(buf1, buf2, size2 - 1)) == -1) {
 			if (errno == EINVAL)
 				break; /* EINVAL for non-links, finish */
 			die("lynx: unable to read symlink: %s: ", buf1);
@@ -330,37 +353,33 @@ main(int argc, char **argv)
 		}
 
 		uintptr_t *tmp1 = (void *)&buf1, *tmp2 = (void *)&buf2;
-		*tmp1 ^= *tmp2, *tmp2 ^= *tmp1, *tmp1 ^= *tmp2;
-		size1 ^= size2, size2 ^= size1, size1 ^= size2;
+		*tmp1 ^= *tmp2; *tmp2 ^= *tmp1; *tmp1 ^= *tmp2;
+		size1 ^= size2; size2 ^= size1; size1 ^= size2;
 		buf1[len] = '\0';
 	}
 
 	struct stat statbuf;
 	if (stat(buf1, &statbuf) == -1)
 		die("lynx: unable to stat file: %s: ", buf1);
-	ispipe = S_ISCHR(statbuf.st_mode); /* no output to stdout */
 	free(buf1); free(buf2);
-
-	if (!ispipe) {
-		if ((file = fopen("/dev/stdout", "wb")) == NULL)
-			die("lynx: unable to open file: /dev/stdout: ");
-	} else if ((file = popen("xclip -sel clip -t image/png",
-			"w")) == NULL) {
-		die("lynx: unable to open pipe: ");
+	if ((device = S_ISCHR(statbuf.st_mode))) {
+		if ((fp = popen("xclip -sel clip -t image/png", "w")) == NULL)
+			die("lynx: unable to open pipe: ");
+	} else if ((fp = fopen("/dev/stdout", "wb")) == NULL) {
+		die("lynx: unable to open file: /dev/stdout: ");
 	}
 
-	png_structp png;
+	png_structp png; png_infop info;
 	if ((png = png_create_write_struct(PNG_LIBPNG_VER_STRING,
 			NULL, NULL, NULL)) == NULL)
 		die("lynx: unable to allocate memory: ");
-	png_infop info;
 	if ((info = png_create_info_struct(png)) == NULL)
 		die("lynx: unable to allocate memory: ");
 	png_set_error_fn(png, NULL, error, error);
 	png_set_IHDR(png, info, w, h, 8, PNG_COLOR_TYPE_RGB_ALPHA,
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
 			PNG_FILTER_TYPE_DEFAULT);
-	png_init_io(png, file);
+	png_init_io(png, fp);
 	png_set_bgr(png);
 
 	png_write_info(png, info);
@@ -370,6 +389,6 @@ main(int argc, char **argv)
 
 	free(res);
 	png_destroy_write_struct(&png, &info);
-	!ispipe ? fclose(file) : pclose(file);
-	xcb_disconnect(d);
+	!device ? fclose(fp) : pclose(fp);
+	xcb_disconnect(conn);
 }
