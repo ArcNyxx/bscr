@@ -149,7 +149,7 @@ sel(short *x, short *y, short *w, short *h)
 	xcb_create_window_checked(d, scr->root_depth, win, scr->root, 0, 0,
 			*w, *h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			scr->root_visual, WINMASK,
-			(uint32_t []){ pix, true, EVTMASK | MASK });
+			(uint32_t []){ /* pix,*/ XCB_BACK_PIXMAP_NONE, true, EVTMASK | MASK });
 	xcb_gcontext_t gc = xcb_generate_id(d);
 	uint32_t val[] = { scr->white_pixel, false };
 
@@ -203,9 +203,15 @@ sel(short *x, short *y, short *w, short *h)
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
 			/* FALLTHROUGH */
 
-			xcb_clear_area(d, true, win, 0, 0,
-					scr->width_in_pixels,
-					scr->height_in_pixels);
+			//xcb_void_cookie_t co = xcb_unmap_window_checked(d, win);
+			//if (xcb_request_check(d, co) != NULL)
+				//die("a\n");
+	//xcb_copy_area(d, scr->root, pix, gc, 0, 0, 0, 0, scr->width_in_pixels,
+			//scr->height_in_pixels);
+	//		xcb_clear_area(d, true, win, 0, 0,
+	//				scr->width_in_pixels,
+	//				scr->height_in_pixels);
+			//xcb_map_window(d, win);
 
 			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
 			if (sw < 0) sx += sw, sw = -sw;
