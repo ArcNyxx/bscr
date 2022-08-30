@@ -134,19 +134,28 @@ monitor(short *x, short *y, short *w, short *h)
 static void
 sel(short *x, short *y, short *w, short *h)
 {
-#define WINMASK XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK
+#define WINMASK XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK | XCB_CW_BACK_PIXMAP
 #define EVTMASK XCB_EVENT_MASK_EXPOSURE
 #define MASK XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | \
 	XCB_EVENT_MASK_BUTTON_MOTION
 
+	xcb_pixmap_t pix = xcb_generate_id(d);
+	xcb_void_cookie_t ja = xcb_create_pixmap_checked(d, scr->root_depth, pix, scr->root,
+			scr->width_in_pixels, scr->height_in_pixels);
+	if (xcb_request_check(d, ja) != NULL)
+		die("jaow\n");
+
 	xcb_window_t win = xcb_generate_id(d);
-	xcb_create_window(d, XCB_COPY_FROM_PARENT, win, scr->root, 0, 0,
+	xcb_create_window_checked(d, scr->root_depth, win, scr->root, 0, 0,
 			*w, *h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			scr->root_visual, WINMASK,
-			(uint32_t []){ true, EVTMASK | MASK });
+			(uint32_t []){ pix, true, EVTMASK | MASK });
 	xcb_gcontext_t gc = xcb_generate_id(d);
-	xcb_create_gc(d, gc, win, XCB_GC_FOREGROUND,
-			(void *){ &scr->white_pixel });
+	uint32_t val[] = { scr->white_pixel, false };
+
+	xcb_create_gc(d, gc, win, XCB_GC_FOREGROUND | XCB_GC_GRAPHICS_EXPOSURES,
+			val);
+	
 
 	xcb_intern_atom_cookie_t ctatom, cdatom;
 	xcb_intern_atom_reply_t *rtatom, *rdatom;
@@ -158,6 +167,10 @@ sel(short *x, short *y, short *w, short *h)
 		die("lynx: unable to get atom\n");
 	xcb_change_property(d, XCB_PROP_MODE_REPLACE, win, rtatom->atom,
 			XCB_ATOM_ATOM, 32, 1, (void *){ &rdatom->atom });
+
+	xcb_copy_area(d, scr->root, pix, gc, 0, 0, 0, 0, scr->width_in_pixels,
+			scr->height_in_pixels);
+	xcb_map_window(d, win);
 
 	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(d, false, scr->root,
 			MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
@@ -173,7 +186,6 @@ sel(short *x, short *y, short *w, short *h)
 		die("lynx: unable to grab keyboard\n");
 	free(ptr); free(key);
 
-			xcb_map_window(d, win);
 
 	xcb_generic_event_t *evt;
 	while ((evt = xcb_wait_for_event(d)) != NULL &&
@@ -191,6 +203,10 @@ sel(short *x, short *y, short *w, short *h)
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
 			/* FALLTHROUGH */
 
+			xcb_clear_area(d, true, win, 0, 0,
+					scr->width_in_pixels,
+					scr->height_in_pixels);
+
 			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
 			if (sw < 0) sx += sw, sw = -sw;
 			if (sh < 0) sy += sh, sh = -sh;
@@ -198,6 +214,7 @@ sel(short *x, short *y, short *w, short *h)
 					{ 0, sh }, { -sw, 0 }, { 0, -sh } };
 			xcb_poly_line(d, XCB_COORD_MODE_PREVIOUS, win, gc, 5,
 					pts);
+			/* FALLTHROUGH */
 		case XCB_EXPOSE: ;
 			xcb_flush(d);
 			break;
@@ -206,6 +223,8 @@ sel(short *x, short *y, short *w, short *h)
 		free(evt);
 	}
 	free(evt);
+
+	xcb_unmap_window(d, win);
 
 	if (*w < 0) *x += *w, *w = -*w;
 	if (*h < 0) *y += *h, *h = -*h;
