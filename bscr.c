@@ -277,6 +277,11 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 	xcb_unmap_window(conn, win);
 	xcb_flush(conn);
 
+	for (int i = 0; i < 5; ++i)
+		xcb_free_cursor(conn, cur[i]);
+	xcb_free_gc(conn, gc);
+	xcb_destroy_window(conn, win);
+
 	if (*w < 0) *x += *w, *w = -*w;
 	if (*h < 0) *y += *h, *h = -*h;
 	nanosleep(&(struct timespec){ .tv_nsec = 2E8 }, NULL);
