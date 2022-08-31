@@ -147,6 +147,22 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT,
 			(uint32_t []){ scr->white_pixel, true });
 
+	xcb_font_t font = xcb_generate_id(conn);
+	xcb_gcontext_t gc = xcb_generate_id(conn);
+	xcb_open_font(conn, font, 6, "cursor");
+	xcb_create_gc(conn, gc, win, XCB_GC_FOREGROUND |
+			XCB_GC_BACKGROUND | XCB_GC_FONT, (uint32_t []){
+			scr->white_pixel, scr->black_pixel, font });
+
+	xcb_cursor_t cur[5];
+	uint16_t names[5] = { 144, 148, 76, 78, 30 };
+	for (int i = 0; i < 5; ++i) {
+		cur[i] = xcb_generate_id(conn);
+		xcb_create_glyph_cursor(conn, cur[i], font, font,
+				names[i], names[i] + 1, 0, 0, 0, ~0, ~0, ~0);
+	}
+	xcb_close_font(conn, font);
+
 	xcb_xkb_use_extension_cookie_t cver =
 			xcb_xkb_use_extension(conn, ~0, ~0);
 	xcb_intern_atom_cookie_t ctype, cdock;
@@ -156,7 +172,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 	XCB_EVENT_MASK_BUTTON_MOTION
 	xcb_grab_pointer_cookie_t cptr = xcb_grab_pointer(conn, false, scr->
 			root, MASK, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-			XCB_NONE, XCB_NONE, XCB_CURRENT_TIME);
+			XCB_NONE, cur[4], XCB_CURRENT_TIME);
 	xcb_grab_keyboard_cookie_t ckey = xcb_grab_keyboard(conn, false,
 			scr->root, XCB_CURRENT_TIME,
 			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
@@ -210,7 +226,6 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			break;
 		}
 		case XCB_KEY_PRESS: {
-			if (!press) break;
 			xcb_key_press_event_t *ev = (void *)evt;
 			switch (xkb_state_key_get_one_sym(state, ev->detail)) {
 			case XKB_KEY_Right:
@@ -228,11 +243,17 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			default:
 				die("bscr: key pressed\n");
 			}
+			if (!press)
+				break;
 		}
 			/* FALLTHROUGH */
-		case XCB_MOTION_NOTIFY: ;
+		case XCB_MOTION_NOTIFY: {
 			xcb_motion_notify_event_t *ev =
 					(xcb_motion_notify_event_t *)evt;
+			xcb_change_active_pointer_grab(conn, cur[(*x <
+					ev->root_x) + (*y < ev->root_y) * 2],
+					XCB_CURRENT_TIME, MASK);
+
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
 			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
 			if (sw < 0) sx += sw, sw = -sw;
@@ -245,6 +266,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			});
 			xcb_map_window(conn, win);
 			xcb_flush(conn);
+		}
 		}
 		free(evt);
 	}

@@ -31,7 +31,7 @@ dist: clean
 install: all
 	mkdir -p $(PREFIX)/bin $(MANPREFIX)/man1
 	cp -f bscr $(PREFIX)/bin
-	chmod 754 $(PREFIX)/bin/bscr
+	chmod 755 $(PREFIX)/bin/bscr
 	sed 's/VERSION/$(VERSION)/g' < bscr.1 > $(MANPREFIX)/man1/bscr.1
 	chmod 644 $(MANPREFIX)/man1/bscr.1
 
