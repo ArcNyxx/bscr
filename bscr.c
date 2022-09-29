@@ -400,36 +400,7 @@ main(int argc, char **argv)
 	if (showcur)
 		cursor(img, x, y, w, h);
 
-	char *buf1, *buf2;
-	ssize_t size1 = 256, size2 = 256;
-	if ((buf1 = malloc(size1)) == NULL || (buf2 = malloc(size2)) == NULL)
-		die("bscr: unable to allocate memory: ");
-	strcpy(buf1, "/dev/stdout");
-
-	for (;;) {
-		ssize_t len;
-		if ((len = readlink(buf1, buf2, size2 - 1)) == -1) {
-			if (errno == EINVAL)
-				break; /* EINVAL for non-links, finish */
-			die("bscr: unable to read symlink: %s: ", buf1);
-		}
-		if (len == size2 - 1) {
-			if ((buf2 = realloc(buf2, size2 * 2)) == NULL)
-				die("bscr: unable to allocate memory: ");
-			continue; /* not enough room, try again */
-		}
-
-		uintptr_t *tmp1 = (void *)&buf1, *tmp2 = (void *)&buf2;
-		*tmp1 ^= *tmp2; *tmp2 ^= *tmp1; *tmp1 ^= *tmp2;
-		size1 ^= size2; size2 ^= size1; size1 ^= size2;
-		buf1[len] = '\0';
-	}
-
-	struct stat statbuf;
-	if (stat(buf1, &statbuf) == -1)
-		die("bscr: unable to stat file: %s: ", buf1);
-	free(buf1); free(buf2);
-	if ((device = S_ISCHR(statbuf.st_mode))) {
+	if ((device = isatty(STDOUT_FILENO))) {
 		if ((fp = popen("xclip -sel clip -t image/png", "w")) == NULL)
 			die("bscr: unable to open pipe: ");
 	} else if ((fp = fopen("/dev/stdout", "wb")) == NULL) {
