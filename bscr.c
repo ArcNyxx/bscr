@@ -25,12 +25,11 @@ xcb_screen_t *scr;
 FILE *fp = NULL; bool device;
 
 static void blend(uint32_t *dest, uint32_t source);
-static void cursor(uint32_t *img, int16_t x, int16_t y, int16_t w, int16_t h);
+static void cursor(uint32_t *img, int x, int y, int w, int h);
 static void die(const char *fmt, ...);
-static void error(png_structp png, png_const_charp msg);
-static void mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query);
-static bool sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h);
-static void win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query);
+static void mon(int *x, int *y, int *w, int *h, bool query);
+static bool sel(int *x, int *y, int *w, int *h);
+static void win(int *x, int *y, int *w, int *h, bool query);
 
 static void
 blend(uint32_t *dest, uint32_t source)
@@ -46,7 +45,7 @@ blend(uint32_t *dest, uint32_t source)
 }
 
 static void
-cursor(uint32_t *img, int16_t x, int16_t y, int16_t w, int16_t h)
+cursor(uint32_t *img, int x, int y, int w, int h)
 {
 	xcb_xfixes_query_version_reply_t *ver;
 	if ((ver = xcb_xfixes_query_version_reply(conn,
@@ -90,13 +89,7 @@ die(const char *fmt, ...)
 }
 
 static void
-error(png_structp png, png_const_charp msg)
-{
-	die("bscr: unable to write png data: %s\n", msg);
-}
-
-static void
-mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
+mon(int *x, int *y, int *w, int *h, bool query)
 {
 	xcb_xinerama_query_version_reply_t *ver;
 	if ((ver = xcb_xinerama_query_version_reply(conn,
@@ -138,7 +131,7 @@ mon(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 }
 
 static bool
-sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
+sel(int *x, int *y, int *w, int *h)
 {
 	xcb_window_t win = xcb_generate_id(conn);
 	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0,
@@ -155,7 +148,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 			scr->white_pixel, scr->black_pixel, font });
 
 	xcb_cursor_t cur[5];
-	uint16_t names[5] = { 144, 148, 76, 78, 30 };
+	uint names[5] = { 144, 148, 76, 78, 30 };
 	for (int i = 0; i < 5; ++i) {
 		cur[i] = xcb_generate_id(conn);
 		xcb_create_glyph_cursor(conn, cur[i], font, font,
@@ -255,7 +248,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 					XCB_CURRENT_TIME, MASK);
 
 			*w = ev->root_x - *x, *h = ev->root_y - *y;
-			int16_t sx = *x, sy = *y, sw = *w, sh = *h;
+			int sx = *x, sy = *y, sw = *w, sh = *h;
 			if (sw < 0) sx += sw, sw = -sw;
 			if (sh < 0) sy += sh, sh = -sh;
 			xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET,
@@ -289,7 +282,7 @@ sel(int16_t *x, int16_t *y, int16_t *w, int16_t *h)
 }
 
 static void
-win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
+win(int *x, int *y, int *w, int *h, bool query)
 {
 	xcb_window_t win = scr->root;
 	if (query) {
@@ -327,18 +320,17 @@ win(int16_t *x, int16_t *y, int16_t *w, int16_t *h, bool query)
 int
 main(int argc, char **argv)
 {
-	char opt = 's', *coords = NULL; bool showcur = false;
-	if (*(argv = &argv[1]) != NULL && (*argv)[0] == '-') {
-		bool end = false; char *optstr = argv[0];
+	bool showcur = false, end = false;
+	char opt = 's', *coords = NULL, *optstr = argv[1];
+	if (*(argv = &argv[1]) != NULL && argv[0][0] == '-')
 		for (int i = 1; optstr[i] != '\0'; ++i)
 			switch (optstr[i]) {
 			case 'c':
-				showcur = true;
-				break;
+				showcur = true; break;
 			case 'i':
 				if (!end && (coords =
 						*(argv = &argv[1])) == NULL)
-					  end = true;
+					end = true;
 				/* FALLTHROUGH */
 			case 'a':
 			case 'm':
@@ -349,31 +341,28 @@ main(int argc, char **argv)
 			default:
 				die("bscr: invalid option: -%c\n", optstr[i]);
 			}
-	}
 
 	int scrnum;
 	conn = xcb_connect(NULL, &scrnum);
-	const xcb_setup_t *setup = xcb_get_setup(conn);
-	xcb_screen_iterator_t iter = xcb_setup_roots_iterator(setup);
+	xcb_screen_iterator_t iter =
+			xcb_setup_roots_iterator(xcb_get_setup(conn));
 	for (int i = 0; i < scrnum; ++i)
 		xcb_screen_next(&iter);
 	scr = iter.data;
 
-	int16_t x = 0, y = 0, w = 0, h = 0;
+	int x = 0, y = 0, w = 0, h = 0;
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("bscr: must supply option with -i argument\n");
-		int16_t arr[3];
-		char *start = coords, *end;
-		for (int i = 0; i < 3; ++i, start = ++end) {
-			arr[i] = strtoul(start, &end, 10);
-			if (*end != ',' || !isdigit(*start))
+		char *start = coords, *last;
+		for (int i = 0; i < 3; ++i, start = ++last) {
+			((int *)&x)[i] = strtoul(start, &last, 10);
+			if (*last != ',' || !isdigit(*start))
 				die("bscr: invalid option: %s\n", coords);
 		}
-		h = strtoul(start, &end, 10);
-		if (*end != '\0' || !isdigit(*start))
+		h = strtoul(start, &last, 10);
+		if (*last != '\0' || !isdigit(*start))
 			die("bscr: invalid option: %s\n", coords);
-		x = arr[0], y = arr[1], w = arr[2];
 	} else if (opt == 'm') {
 		mon(&x, &y, &w, &h, true);
 	} else if (opt == 's') {
@@ -413,12 +402,11 @@ main(int argc, char **argv)
 		die("bscr: unable to allocate memory: ");
 	if ((info = png_create_info_struct(png)) == NULL)
 		die("bscr: unable to allocate memory: ");
-	png_set_error_fn(png, NULL, error, error);
 	png_set_IHDR(png, info, w, h, 8, PNG_COLOR_TYPE_RGB_ALPHA,
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
 			PNG_FILTER_TYPE_DEFAULT);
-	png_init_io(png, fp);
 	png_set_bgr(png);
+	png_init_io(png, fp);
 
 	png_write_info(png, info);
 	for (int i = 0; i < h; ++i)
