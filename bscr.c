@@ -3,7 +3,6 @@
  * see LICENCE file for licensing information */
 
 #include <ctype.h>
-#include <errno.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -22,7 +21,6 @@
 
 xcb_connection_t *conn;
 xcb_screen_t *scr;
-FILE *fp = NULL; bool device;
 
 static void blend(uint32_t *dest, uint32_t source);
 static void cursor(uint32_t *img, int x, int y, int w, int h);
@@ -81,8 +79,6 @@ die(const char *fmt, ...)
 
 	if (fmt[strlen(fmt) - 1] != '\n')
 		perror(NULL);
-	if (fp != NULL)
-		!device ? fclose(fp) : pclose(fp);
 	if (conn != NULL)
 		xcb_disconnect(conn);
 	exit(1);
@@ -389,13 +385,6 @@ main(int argc, char **argv)
 	if (showcur)
 		cursor(img, x, y, w, h);
 
-	if ((device = isatty(STDOUT_FILENO))) {
-		if ((fp = popen("xclip -sel clip -t image/png", "w")) == NULL)
-			die("bscr: unable to open pipe: ");
-	} else if ((fp = fopen("/dev/stdout", "wb")) == NULL) {
-		die("bscr: unable to open file: /dev/stdout: ");
-	}
-
 	png_structp png; png_infop info;
 	if ((png = png_create_write_struct(PNG_LIBPNG_VER_STRING,
 			NULL, NULL, NULL)) == NULL)
@@ -406,15 +395,23 @@ main(int argc, char **argv)
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
 			PNG_FILTER_TYPE_DEFAULT);
 	png_set_bgr(png);
+
+	FILE *fp;
+	if (isatty(STDOUT_FILENO)) {
+		if ((fp = popen("graxp -t image/png >/dev/null", "w")) == NULL)
+			die("bscr: unable to open pipe: ");
+	} else if ((fp = fdopen(STDOUT_FILENO, "wb")) == NULL) {
+		die("bscr: unable to open stdout: ");
+	}
 	png_init_io(png, fp);
 
 	png_write_info(png, info);
 	for (int i = 0; i < h; ++i)
-		png_write_rows(png, &(png_bytep){ (png_bytep)&img[i * w] }, 1);
+		png_write_row(png, (unsigned char *)&img[i * w]);
 	png_write_end(png, NULL);
 
 	free(res);
 	png_destroy_write_struct(&png, &info);
-	!device ? fclose(fp) : pclose(fp);
+	isatty(STDOUT_FILENO) ? fclose(fp) : pclose(fp);
 	xcb_disconnect(conn);
 }
