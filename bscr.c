@@ -284,32 +284,25 @@ win(int *x, int *y, int *w, int *h, bool query)
 	if (query) {
 		xcb_get_input_focus_reply_t *focus;
 		if ((focus = xcb_get_input_focus_reply(conn,
-				xcb_get_input_focus(conn), NULL)) != NULL) {
-			win = focus->focus;
-			free(focus);
+				xcb_get_input_focus(conn), NULL)) != NULL)
+			win = focus->focus, free(focus);
+	} else for (xcb_query_pointer_reply_t *ptr; ; ) {
+		if ((ptr = xcb_query_pointer_reply(conn,
+				xcb_query_pointer(conn, win), NULL)) == NULL)
+			die("bscr: unable to query pointer\n");
+		if (ptr->child != 0) {
+			win = ptr->child, free(ptr);
+		} else {
+			free(ptr); break;
 		}
-	} else {
-		xcb_query_pointer_reply_t *ptr;
-		for (;;) {
-			if ((ptr = xcb_query_pointer_reply(conn,
-					xcb_query_pointer(conn, win),
-					NULL)) == NULL)
-				die("bscr: unable to query pointer\n");
-			if (ptr->child == 0)
-				break;
-			win = ptr->child;
-			free(ptr);
-		}
-		free(ptr);
 	}
 
 	xcb_get_geometry_reply_t *geom;
 	if ((geom = xcb_get_geometry_reply(conn,
 			xcb_get_geometry(conn, win), NULL)) == NULL)
 		die("bscr: unable to get geometry\n");
-	*x = geom->x, *y = geom->y;
-	*w = geom->width  + 2 * geom->border_width;
-	*h = geom->height + 2 * geom->border_width;
+	*x = geom->x, *y = geom->y, *w = geom->width + 2 * geom->border_width,
+			*h = geom->height + 2 * geom->border_width;
 	free(geom);
 }
 
