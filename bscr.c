@@ -144,7 +144,7 @@ sel(int *x, int *y, int *w, int *h)
 			scr->white_pixel, scr->black_pixel, font });
 
 	xcb_cursor_t cur[5];
-	uint names[5] = { 144, 148, 76, 78, 30 };
+	unsigned int names[5] = { 144, 148, 76, 78, 30 };
 	for (int i = 0; i < 5; ++i) {
 		cur[i] = xcb_generate_id(conn);
 		xcb_create_glyph_cursor(conn, cur[i], font, font,
@@ -396,15 +396,14 @@ main(int argc, char **argv)
 	} else if ((fp = fdopen(STDOUT_FILENO, "wb")) == NULL) {
 		die("bscr: unable to open stdout: ");
 	}
-	png_init_io(png, fp);
 
+	png_init_io(png, fp);
 	png_write_info(png, info);
 	for (int i = 0; i < h; ++i)
 		png_write_row(png, (unsigned char *)&img[i * w]);
 	png_write_end(png, NULL);
 
-	free(res);
-	png_destroy_write_struct(&png, &info);
 	isatty(STDOUT_FILENO) ? fclose(fp) : pclose(fp);
-	xcb_disconnect(conn);
+	png_destroy_write_struct(&png, &info);
+	free(res); xcb_disconnect(conn);
 }
