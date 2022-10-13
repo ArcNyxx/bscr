@@ -94,10 +94,8 @@ mon(int *x, int *y, int *w, int *h, bool query)
 		die("bscr: unable to use xinerama\n");
 	free(ver);
 
-	xcb_xinerama_query_screens_reply_t *info;
-	if ((info = xcb_xinerama_query_screens_reply(conn,
-			xcb_xinerama_query_screens(conn), NULL)) == NULL)
-		return;
+	xcb_xinerama_query_screens_cookie_t inc =
+			xcb_xinerama_query_screens(conn);
 	if (query) {
 		xcb_query_pointer_reply_t *ptr;
 		if ((ptr = xcb_query_pointer_reply(conn,
@@ -108,6 +106,9 @@ mon(int *x, int *y, int *w, int *h, bool query)
 		free(ptr);
 	}
 
+	xcb_xinerama_query_screens_reply_t *info;
+	if ((info = xcb_xinerama_query_screens_reply(conn, inc, NULL)) == NULL)
+		return;
 	xcb_xinerama_screen_info_iterator_t iter =
 			xcb_xinerama_query_screens_screen_info_iterator(info);
 	while (iter.rem > 0) {
@@ -121,14 +122,12 @@ mon(int *x, int *y, int *w, int *h, bool query)
 		xcb_xinerama_screen_info_next(&iter);
 	}
 	free(info);
-
-	if (*w == 0 || *h == 0)
-		*w = scr->width_in_pixels, *h = scr->height_in_pixels;
 }
 
 static bool
 sel(int *x, int *y, int *w, int *h)
 {
+	*w = *h = 0;
 	xcb_window_t win = xcb_generate_id(conn);
 	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0,
 			scr->width_in_pixels, scr->height_in_pixels, 0,
@@ -339,7 +338,7 @@ main(int argc, char **argv)
 		xcb_screen_next(&iter);
 	scr = iter.data;
 
-	int x = 0, y = 0, w = 0, h = 0;
+	int x = 0, y = 0, w = scr->width_in_pixels, h = scr->height_in_pixels;
 	if (opt == 'i') {
 		if (coords == NULL)
 			die("bscr: must supply option with -i argument\n");
@@ -364,8 +363,6 @@ main(int argc, char **argv)
 			mon(&x, &y, &w, &h, false);
 	} else if (opt == 'w') {
 		win(&x, &y, &w, &h, true);
-	} else {
-		w = scr->width_in_pixels; h = scr->height_in_pixels;
 	}
 
 	xcb_get_image_reply_t *res;
