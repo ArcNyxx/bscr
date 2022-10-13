@@ -271,7 +271,7 @@ sel(int *x, int *y, int *w, int *h)
 	}
 	free(evt);
 
-	xkb_state_unre(state);
+	xkb_state_unref(state);
 	xkb_keymap_unref(map);
 	xkb_context_unref(ctx);
 	xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);

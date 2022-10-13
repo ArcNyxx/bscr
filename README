@@ -4,7 +4,7 @@ bscr is a simple screenshot utility for x.
 
 Requirements
 ------------
-bscr requires libpng, libxcb and its extensions, libxkbcommon, and xclip.
+bscr requires libpng, libxcb and its extensions, libxkbcommon, and graxp.
 
 Installation
 ------------
