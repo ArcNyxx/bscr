@@ -127,27 +127,36 @@ mon(int *x, int *y, int *w, int *h, bool query)
 static bool
 sel(int *x, int *y, int *w, int *h)
 {
-	*w = *h = 0;
 	xcb_window_t win = xcb_generate_id(conn);
-	xcb_create_window(conn, scr->root_depth, win, scr->root, 0, 0,
+	if (xcb_request_check(conn, xcb_create_window_checked(conn,
+			scr->root_depth, win, scr->root, 0, 0,
 			scr->width_in_pixels, scr->height_in_pixels, 0,
 			XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
 			XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT,
-			(uint32_t []){ scr->white_pixel, true });
+			(uint32_t []){ scr->white_pixel, true })) != NULL)
+		die("bscr: unable to create window\n");
 
 	xcb_font_t font = xcb_generate_id(conn);
+	if (xcb_request_check(conn, xcb_open_font_checked(conn,
+			font, 6, "cursor")) != NULL)
+		die("bscr: unable to open cursor font\n");
+
 	xcb_gcontext_t gc = xcb_generate_id(conn);
-	xcb_open_font(conn, font, 6, "cursor");
-	xcb_create_gc(conn, gc, win, XCB_GC_FOREGROUND |
-			XCB_GC_BACKGROUND | XCB_GC_FONT, (uint32_t []){
-			scr->white_pixel, scr->black_pixel, font });
+	if (xcb_request_check(conn, xcb_create_gc_checked(conn, gc, win,
+			XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT,
+			(uint32_t []){ scr->white_pixel,
+			scr->black_pixel, font })) != NULL)
+		die("bscr: unable to create graphics context\n");
 
 	xcb_cursor_t cur[5];
-	unsigned int names[5] = { 144, 148, 76, 78, 30 };
+	const unsigned int names[5] = { 144, 148, 76, 78, 30 };
 	for (int i = 0; i < 5; ++i) {
 		cur[i] = xcb_generate_id(conn);
-		xcb_create_glyph_cursor(conn, cur[i], font, font,
-				names[i], names[i] + 1, 0, 0, 0, ~0, ~0, ~0);
+		if (xcb_request_check(conn,
+				xcb_create_glyph_cursor_checked(conn, cur[i],
+				font, font, names[i], names[i] + 1,
+				0, 0, 0, ~0, ~0, ~0)) != NULL)
+			die("bscr: unable to create cursor\n");
 	}
 	xcb_close_font(conn, font);
 
@@ -202,7 +211,9 @@ sel(int *x, int *y, int *w, int *h)
 		die("bscr: unable to grab keyboard\n");
 	free(ver); free(type); free(dock); free(ptr); free(key);
 
-	xcb_generic_event_t *evt; bool left = true, press = false;
+	*w = *h = 0;
+	xcb_generic_event_t *evt;
+	bool left = true, press = false;
 	while ((evt = xcb_wait_for_event(conn)) != NULL &&
 			(evt->response_type & ~0x80) != XCB_BUTTON_RELEASE) {
 		switch (evt->response_type & ~0x80) {
@@ -260,6 +271,9 @@ sel(int *x, int *y, int *w, int *h)
 	}
 	free(evt);
 
+	xkb_state_unre(state);
+	xkb_keymap_unref(map);
+	xkb_context_unref(ctx);
 	xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
 	xcb_ungrab_keyboard(conn, XCB_CURRENT_TIME);
 	xcb_unmap_window(conn, win);
